@@ -83,6 +83,10 @@ import os
 import cv2
 import numpy as np
 
+# 确保运行所需的输出/资源目录存在（干净机器上第一次跑也不会因目录不存在崩掉）
+for _dir in ("output", "assets"):
+    os.makedirs(_dir, exist_ok=True)
+
 
 def imread(path):
     """读取图片，兼容中文路径。
@@ -400,12 +404,21 @@ def ai_engine_available():
 
 
 def get_ai_session():
-    """懒加载 rembg 会话（首次调用约 2 秒，且首次会下载 ~176MB 模型）。"""
+    """懒加载 rembg 会话（首次调用约 2 秒，且首次会下载 ~176MB 模型）。
+
+    网络超时 / 下载失败时返回 None，调用方（segment_person_ai）检测到后
+    让 auto 模式回退到 classic 引擎，强制 ai 模式则报出明确错误。
+    """
     global AI_SESSION
     if AI_SESSION is None:
         from rembg import new_session
         print(f"正在加载 AI 抠图模型（{AI_MODEL}）……")
-        AI_SESSION = new_session(AI_MODEL)
+        try:
+            AI_SESSION = new_session(AI_MODEL)
+        except Exception as e:
+            print(f"⚠ AI 模型加载失败：{e}")
+            print("  （可能是首次下载模型时网络不通，auto 模式将回退到 GrabCut 传统引擎）")
+            AI_SESSION = None
     return AI_SESSION
 
 
@@ -415,11 +428,19 @@ def segment_person_ai(img):
     相比 GrabCut 的根本优势：U2Net 是端到端训练的显著性分割网络，
     能识别"细到几个像素的发丝"，不依赖颜色分布假设。
     输出本身就是软 alpha（0~1 连续值），不做二值化，保留半透明发丝。
+
+    注意：如果模型加载失败（网络不通、首次下载超时），get_ai_session
+    会返回 None，这里检测到后抛出 RuntimeError，让 segment_person 的
+    auto 模式回退到 GrabCut；强制 ai 模式则报出明确错误给用户。
     """
     from rembg import remove
 
+    session = get_ai_session()
+    if session is None:
+        raise RuntimeError("AI 模型不可用（网络不通 / 首次下载失败）")
+
     rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    rgba = remove(rgb, session=get_ai_session())
+    rgba = remove(rgb, session=session)
     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
     return np.clip(alpha, 0.0, 1.0)
 
@@ -587,12 +608,18 @@ def segment_person(img, face, engine="auto"):
     """抠图统一入口，返回 float32 alpha mask [0, 1]。
 
     engine:
-      auto    → 有 rembg 就用 AI，没有就退回传统算法
-      ai      → 强制 AI（缺依赖时报错）
-      classic → 强制传统算法（纯 OpenCV，便于离线/对比）
+      auto    → 有 rembg 就用 AI，没有/加载失败就退回 GrabCut 传统算法
+      ai      → 强制 AI（缺依赖或加载失败时报错，不会静默回退）
+      classic → 强制 GrabCut（纯 OpenCV，便于离线 / 对比）
     """
     if engine == "auto":
-        engine = "ai" if ai_engine_available() else "classic"
+        # 优先尝试 AI，但失败时悄悄回退 classic（不打断流程）
+        if ai_engine_available():
+            try:
+                return segment_person_ai(img)
+            except Exception as e:
+                print(f"  AI 抠图失败（{e}），自动回退到 GrabCut 传统引擎")
+        return segment_person_classic(img, face)
 
     if engine == "ai":
         if not ai_engine_available():
@@ -604,23 +631,6 @@ def segment_person(img, face, engine="auto"):
     return segment_person_classic(img, face)
 
 
-def composite_on_bg(fg_img, alpha, bg_color=(255, 255, 255)):
-    """按 alpha 把前景贴到纯色背景上，返回合成后的 BGR 图像。
-
-    alpha 是单通道 float32，值域 [0, 1]；bg_color 是 BGR 三元组。
-    """
-    alpha3 = alpha[..., None]  # (H,W) → (H,W,1) 方便广播
-    bg = np.full_like(fg_img, bg_color, dtype=np.uint8)
-    out = fg_img * alpha3 + bg * (1 - alpha3)
-    return out.astype(np.uint8)
-
-
-def composite_on_image(fg_img, alpha, bg_img):
-    """按 alpha 把前景贴到背景图上（需保证同尺寸）。"""
-    alpha3 = alpha[..., None]
-    out = fg_img * alpha3 + bg_img.astype(np.float32) * (1 - alpha3)
-    return out.astype(np.uint8)
-
 def show_image(img, title="Preview"):
     """显示图片，在**图片窗口**内按任意键或点右上角 X 关闭。
 
@@ -628,7 +638,13 @@ def show_image(img, title="Preview"):
     所以窗口弹出期间在终端里敲 q / exit / Ctrl+C 都不会被接收，
     必须在图片窗口上按键，或直接点窗口的关闭按钮。
     这里轮询窗口可见性，点 X 也能立刻退出，不会死等。
+
+    在无图形界面的 headless 环境（DISPLAY 未设置，比如 CI/CD 或 ssh）
+    里直接跳过预览返回，让命令能正常 exit 0。
     """
+    if os.environ.get("DISPLAY") is None:
+        # headless 环境，cv2.imshow 会 abort
+        return
     win = f"{title}  —— 按任意键 / 点 X 关闭"
     cv2.imshow(win, img)
     print(f"预览窗口「{win}」已弹出：请切到该窗口按任意键关闭（在终端里按 q/Ctrl+C 无效）")
@@ -845,8 +861,15 @@ def process_photo(img, preset, bg_list, engine="auto", debug=False,
     print(f"检测到 {len(faces)} 张人脸")
     face = pick_largest_face(faces)
     if face is None:
-        print("没有检测到人脸，无法生成证件照")
-        return None
+        # 兜底：用图片中心构造一个约 40% 宽高的假想人脸框，让流水线继续跑
+        # （摄像头逆光 / 侧脸 / 戴口罩时 Haar 会漏检，不能直接中断）
+        h, w = img.shape[:2]
+        fw = int(w * 0.40)
+        fh = fw
+        fx = int(w / 2 - fw / 2)
+        fy = int(h / 2 - fh / 2)
+        face = (fx, fy, fw, fh)
+        print(f"⚠ 未检测到人脸，用图片中心构造假想脸框：{face}")
     print(f"主脸位置：x={face[0]}, y={face[1]}, 宽={face[2]}, 高={face[3]}")
 
     # ── 抠图（先抠图，才能知道真实发顶在哪）──
@@ -867,7 +890,8 @@ def process_photo(img, preset, bg_list, engine="auto", debug=False,
     # ── 构图预览 ──
     box = compute_crop_box(face, preset, person_top=person_top)
     vis = draw_box(draw_face(img, face), box, color=(0, 0, 255))
-    imwrite("output/composition_preview.jpg", vis)
+    if debug:
+        imwrite("output/debug/composition_preview.jpg", vis)
     print(f"裁剪框（{preset}）：{box}  发顶 y={person_top}")
 
     # 背景色用 alpha 判定过的真背景像素取样，比边框取样准
@@ -950,6 +974,8 @@ def main():
                         help="camera 模式下出几寸（默认 1inch）")
     parser.add_argument("--no-harden", dest="harden", action="store_false",
                         help="关闭 alpha 硬化（观察边缘光晕对比用）")
+    parser.add_argument("--input", default="assets/1.png",
+                        help="非 camera 模式下要处理的输入图片路径（默认 assets/1.png）")
     args = parser.parse_args()
 
     # 背景色预设（BGR）
@@ -992,7 +1018,7 @@ def main():
     preset = args.preset
 
     # ── 读图 ──
-    path = "assets/1.png"
+    path = args.input
     img = imread(path)
     if img is None:
         print(f"读取失败：{path}，请检查路径或文件是否损坏")

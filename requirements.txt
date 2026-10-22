@@ -1,0 +1,16 @@
+# 证件照自动裁剪与背景替换 —— 依赖清单
+# 必需：基础图片处理
+opencv-python>=4.5
+numpy>=1.20
+
+# 可选（强烈推荐，AI 抠图）：rembg + onnxruntime
+# 首次运行会自动下载 ~176MB 的 U2Net 模型权重（需要能访问 github.com）
+# 网络不通时自动回退到 GrabCut 传统引擎（纯 OpenCV）
+rembg>=2.0
+onnxruntime>=1.10
+
+# 可选（随 rembg 自动安装）：Alpha Matting 精修
+pymatting>=1.1
+
+# 可选：PIL 用于渲染中文（cv2.putText 不支持 CJK）
+Pillow>=9.0

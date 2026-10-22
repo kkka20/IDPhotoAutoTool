@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+
+# 生成产物与个人照片（含肖像，不上传到 GitHub）
+output/
+assets/1.png
+assets/camera_shot.jpg

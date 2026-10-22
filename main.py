@@ -293,11 +293,9 @@ def build_grabcut_rect(face, img_shape):
 def estimate_bg_color(img, band=15, alpha=None):
     """估计原图背景色，返回 BGR float32。
 
-    三种策略按优先级组合：
-      1. 有 alpha 时：只取 alpha < 0.02 的像素（已被判定为背景），最准
-      2. 无 alpha 时：从四角像素做 K-Means(K=3) 聚类，取占比最大的 cluster 中心
-         —— 证件照里四角几乎一定是背景，K-Means 能把衣服/地板这类误判样本剔掉
-      3. 兜底（K-Means 失败时）：取四周 band 像素边框的中位数
+    两种取样方式：
+      - 有 alpha 时：只取 alpha < 0.02 的像素（已被判定为背景），最准
+      - 无 alpha 时：退化为取四周 band 像素边框的中位数
     取中位数而不是均值，避免肩膀/衣服像素拉偏估计。
     """
     if alpha is not None:
@@ -307,26 +305,6 @@ def estimate_bg_color(img, band=15, alpha=None):
                              axis=0).astype(np.float32)
 
     H, W = img.shape[:2]
-
-    # 策略 2：四角 K-Means 聚类（比边框中位数抗衣服/地板干扰）
-    try:
-        # 四个角 + 各取 band 像素，总共 4*band² 样本
-        b = min(band * 2, H // 8, W // 8)
-        corners = [img[0:b, 0:b], img[0:b, W - b:W],
-                   img[H - b:H, 0:b], img[H - b:H, W - b:W]]
-        samples = np.concatenate([c.reshape(-1, 3) for c in corners], axis=0).astype(np.float32)
-        if samples.shape[0] > 100:
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-            _, labels, centers = cv2.kmeans(
-                samples, 3, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS
-            )
-            # 取占比最大的 cluster 中心（四角里背景一定是最大类）
-            counts = np.bincount(labels.flatten(), minlength=3)
-            return centers[int(np.argmax(counts))].astype(np.float32)
-    except Exception:
-        pass  # K-Means 任何异常都不打断，走兜底
-
-    # 策略 3：兜底 —— 四周 band 边框中位数
     b = min(band, H // 10, W // 10)
     strips = [
         img[:b, :],          # 上
@@ -664,8 +642,8 @@ def show_image(img, title="Preview"):
     在无图形界面的 headless 环境（DISPLAY 未设置，比如 CI/CD 或 ssh）
     里直接跳过预览返回，让命令能正常 exit 0。
     """
-    if not os.environ.get("DISPLAY"):
-        # headless 环境（DISPLAY 未设置或为空），cv2.imshow 会 abort
+    if os.environ.get("DISPLAY") is None:
+        # headless 环境，cv2.imshow 会 abort
         return
     win = f"{title}  —— 按任意键 / 点 X 关闭"
     cv2.imshow(win, img)
@@ -998,8 +976,6 @@ def main():
                         help="关闭 alpha 硬化（观察边缘光晕对比用）")
     parser.add_argument("--input", default="assets/1.png",
                         help="非 camera 模式下要处理的输入图片路径（默认 assets/1.png）")
-    parser.add_argument("--batch", default=None,
-                        help="批量模式：处理该目录下所有 jpg/png/jpeg 图片，不再走 --input")
     args = parser.parse_args()
 
     # 背景色预设（BGR）
@@ -1041,36 +1017,7 @@ def main():
 
     preset = args.preset
 
-    # ── 批量模式：处理目录下所有 jpg/png/jpeg ──
-    if args.batch is not None:
-        batch_dir = args.batch
-        if not os.path.isdir(batch_dir):
-            print(f"批量目录不存在：{batch_dir}")
-            return
-        exts = (".jpg", ".jpeg", ".png")
-        image_paths = sorted([
-            os.path.join(batch_dir, f)
-            for f in os.listdir(batch_dir)
-            if f.lower().endswith(exts)
-        ])
-        if not image_paths:
-            print(f"{batch_dir} 里没有 jpg/png/jpeg")
-            return
-        print(f"批量模式：找到 {len(image_paths)} 张图片")
-        for i, path in enumerate(image_paths, 1):
-            img = imread(path)
-            if img is None:
-                print(f"  [{i}/{len(image_paths)}] 跳过（读取失败）：{path}")
-                continue
-            stem = os.path.splitext(os.path.basename(path))[0]
-            print(f"\n[{i}/{len(image_paths)}] 处理 {path} …")
-            process_photo(img, preset, bg_list,
-                          engine=args.engine, debug=args.debug,
-                          matting=args.matting, harden=args.harden,
-                          out_prefix=f"batch_{preset}_{stem}")
-        return
-
-    # ── 单张模式 ──
+    # ── 读图 ──
     path = args.input
     img = imread(path)
     if img is None:

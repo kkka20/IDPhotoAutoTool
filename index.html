@@ -1,0 +1,1714 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>证件照工作台</title>
+<style>
+  :root {
+    --primary: #2f6bff;
+    --primary-dark: #1f4fd6;
+    --bg: #eef1f7;
+    --card: #fff;
+    --text: #17202f;
+    --muted: #79839a;
+    --border: #e4e9f2;
+    --danger: #d64545;
+    --warn: #b8860b;
+    --radius: 13px;
+    --shadow: 0 5px 22px rgba(25, 45, 95, .07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    padding: 12px 16px 76px;
+  }
+
+  /* ═══ 顶栏 ═══ */
+  .topbar {
+    max-width: 1440px; margin: 0 auto 10px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 9px; flex: none; }
+  .brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -.2px; }
+  .brand .sub { font-size: 11px; color: var(--muted); }
+
+  .hint-banner {
+    flex: 1; display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: 9px;
+    background: linear-gradient(96deg, #ff8a1f, #ffb01f 55%, #ffc94a);
+    color: #fff; font-size: 12.5px; font-weight: 600;
+    box-shadow: 0 3px 12px rgba(255, 150, 30, .3);
+  }
+  .hint-banner b { font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+  .hint-banner .ico { font-size: 15px; flex: none; }
+
+  .top-actions { display: flex; gap: 8px; flex: none; }
+
+  /* ═══ 三栏 ═══ */
+  .workspace {
+    max-width: 1440px; margin: 0 auto;
+    display: grid;
+    grid-template-columns: 218px minmax(0, 1fr) 258px;
+    gap: 12px;
+    align-items: start;
+  }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  .panel {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 12px 13px;
+  }
+  .panel > h2 {
+    font-size: 12px; font-weight: 700; margin-bottom: 9px;
+    display: flex; align-items: center; gap: 6px; color: #3a455c;
+    letter-spacing: .2px;
+  }
+  .panel > h2 .hint { font-size: 10.5px; color: var(--muted); font-weight: 400; margin-left: auto; }
+
+  /* ── 尺寸列表（参考图风格） ── */
+  .size-list { display: flex; flex-direction: column; gap: 6px; }
+  .size-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: 9px; cursor: pointer;
+    border: 1.5px solid transparent; background: #f7f9fc;
+    transition: all .15s;
+  }
+  .size-item:hover { background: #eef3fb; }
+  .size-item.on {
+    border-color: var(--primary); background: #f2f7ff;
+    box-shadow: 0 0 0 3px rgba(47,107,255,.09);
+  }
+  .size-item .ico { font-size: 15px; opacity: .65; flex: none; }
+  .size-item .txt { flex: 1; min-width: 0; }
+  .size-item .n { font-size: 12.5px; font-weight: 650; line-height: 1.25; }
+  .size-item .s { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .size-item .tick {
+    font-size: 12px; color: var(--primary); font-weight: 700;
+    opacity: 0; flex: none;
+  }
+  .size-item.on .tick { opacity: 1; }
+
+  /* ── 功能勾选（左栏底部，紧凑） ── */
+  .feat-list { display: flex; flex-direction: column; gap: 5px; }
+  .feat {
+    display: flex; align-items: flex-start; gap: 7px; padding: 6px 8px;
+    border-radius: 8px; border: 1.5px solid var(--border); cursor: pointer;
+    transition: all .15s; background: #fff;
+  }
+  .feat:hover:not(.off) { border-color: #c2d3f8; }
+  .feat.on { border-color: var(--primary); background: #f6f9ff; }
+  .feat.off { opacity: .5; cursor: not-allowed; background: #fafbfc; }
+  .feat input {
+    margin-top: 2px; width: 13px; height: 13px; accent-color: var(--primary);
+    cursor: pointer; flex: none;
+  }
+  .feat .txt { flex: 1; min-width: 0; }
+  .feat .t { font-size: 11.5px; font-weight: 650; display: flex; align-items: center; gap: 4px; }
+  .feat .t .badge {
+    font-size: 8.5px; padding: 0 4px; border-radius: 3px; font-weight: 600;
+    background: #eef3ff; color: var(--primary);
+  }
+  .feat .t .badge.soon { background: #f2f3f5; color: #98a1b3; }
+  .feat .d { font-size: 9.5px; color: var(--muted); line-height: 1.3; }
+
+  /* ═══ 中间大舞台 ═══ */
+  .stage {
+    position: relative;
+    background: #fff; border-radius: var(--radius); box-shadow: var(--shadow);
+    border: 1px solid #e9edf5;
+    min-height: min(74vh, 700px);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .stage-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-bottom: 1px solid #f1f4f9;
+    flex: none;
+  }
+  .stage-head .t { font-size: 12px; font-weight: 700; color: #3a455c; }
+  .stage-head .dim {
+    margin-left: auto; font-size: 11px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stage-body { flex: 1; position: relative; display: flex; min-height: 0; }
+
+  /* ── 空状态 ── */
+  .stage-empty {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    padding: 30px 20px;
+  }
+  .empty-title { font-size: 17px; font-weight: 700; color: #2b3548; text-align: center; }
+  .empty-title span { color: var(--primary); }
+  .empty-sub { font-size: 12px; color: var(--muted); margin-top: -10px; text-align: center; }
+
+  .src-actions { display: flex; gap: 12px; }
+  .src-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; width: 132px; padding: 18px 10px;
+    border-radius: 12px; cursor: pointer;
+    border: 1.5px dashed #cfd9ea; background: #fafbfe;
+    font-size: 12.5px; font-weight: 650; transition: all .16s;
+  }
+  .src-btn:hover { border-color: var(--primary); background: #f2f7ff; }
+  .src-btn.primary-src {
+    border: 1.5px solid var(--primary); background: var(--primary); color: #fff;
+    box-shadow: 0 5px 16px rgba(47,107,255,.28);
+  }
+  .src-btn.primary-src:hover { background: var(--primary-dark); }
+  .src-btn .emo { font-size: 22px; line-height: 1; }
+  .src-btn .d { font-size: 10px; font-weight: 400; opacity: .75; }
+
+  .empty-tip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border-radius: 8px;
+    background: #fff7ea; color: #a86400; font-size: 11.5px; font-weight: 600;
+    border: 1px dashed #ffd8a3;
+  }
+
+  /* ── 摄像头状态 ── */
+  .stage-camera {
+    position: absolute; inset: 0;
+    background: #0d1117;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #camera-video {
+    width: 100%; height: 100%; object-fit: cover;
+    display: block;
+    /* 多数笔记本/外接摄像头在 Linux 下输出的画面本身是镜像的，
+       不翻转会出现"伸左手显示右手"。这里统一翻回真实方向，
+       拍照时也做同样翻转，保证预览与成片一致。 */
+    transform: scaleX(-1);
+  }
+  .cam-guide {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .guide-frame {
+    position: relative;
+    flex: none;
+    height: 84%;
+    max-height: 84%;
+    max-width: 88%;
+    aspect-ratio: 295 / 413;
+    border: 2px solid rgba(255,255,255,.92);
+    border-radius: 8px;
+    box-shadow: 0 0 0 9999px rgba(9, 14, 24, .48);
+  }
+  .guide-frame::before,
+  .guide-frame::after {
+    content: '';
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: rgba(255,255,255,.28);
+  }
+  .guide-frame::before { top: 8%; }    /* 头顶参考线 */
+  .guide-frame::after { top: 44%; }    /* 眼睛参考线 */
+  .cam-hint {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    background: rgba(9,14,24,.72); color: #fff; font-size: 11.5px;
+    padding: 6px 13px; border-radius: 20px; white-space: nowrap;
+    border: 1px solid rgba(255,255,255,.16);
+  }
+  .cam-bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 14px 16px; display: flex; gap: 10px; justify-content: center;
+    background: linear-gradient(to top, rgba(9,14,24,.72), transparent);
+  }
+
+  /* ── 结果状态 ── */
+  .stage-result {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 16px 16px 58px; min-height: 0; position: relative;
+    background:
+      linear-gradient(45deg, #f7f9fc 25%, transparent 25%) 0 0 / 16px 16px,
+      linear-gradient(-45deg, #f7f9fc 25%, transparent 25%) 8px 8px / 16px 16px,
+      linear-gradient(45deg, transparent 75%, #f7f9fc 75%) 8px 8px / 16px 16px,
+      linear-gradient(-45deg, transparent 75%, #f7f9fc 75%) 0 0 / 16px 16px;
+    background-color: #fff;
+  }
+  #preview-canvas {
+    display: block; border-radius: 6px;
+    box-shadow: 0 6px 26px rgba(15, 25, 45, .2);
+    max-width: 100%; max-height: 100%;
+  }
+
+  /* 结果状态下角标：换照片 / 重新拍照 */
+  .stage-tools {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; gap: 6px;
+  }
+  .mini-btn {
+    background: rgba(255,255,255,.94); border: 1px solid var(--border);
+    border-radius: 7px; padding: 5px 10px; font-size: 11px; font-weight: 600;
+    cursor: pointer; color: var(--text); transition: all .15s;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .mini-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* 校验信息：浮在舞台底部 */
+  .checks {
+    position: absolute; left: 10px; bottom: 10px; right: 10px;
+    display: flex; flex-direction: column; gap: 4px;
+    pointer-events: none;
+  }
+  .check {
+    font-size: 10.5px; padding: 5px 9px; border-radius: 6px;
+    line-height: 1.35; align-self: flex-start; max-width: 100%;
+    backdrop-filter: blur(4px);
+  }
+  .check.ok { background: rgba(239,250,241,.94); color: #1b7f3c; }
+  .check.warn { background: rgba(255,249,232,.95); color: var(--warn); }
+  .check.bad { background: rgba(255,241,241,.96); color: var(--danger); }
+
+  /* ═══ 右栏：背景色 ═══ */
+  .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+  .preset {
+    border: 1.5px solid var(--border); border-radius: 8px; padding: 5px 3px;
+    cursor: pointer; text-align: center; transition: all .15s; background: #fff;
+  }
+  .preset.on { border-color: var(--primary); box-shadow: 0 0 0 2.5px rgba(47,107,255,.13); }
+  .preset .sw {
+    height: 20px; border-radius: 4px; border: 1px solid rgba(0,0,0,.09);
+    margin-bottom: 3px;
+  }
+  .preset .nm { font-size: 10px; font-weight: 650; }
+  .preset .rgb { font-size: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* 竖向调色板 */
+  .palette-vert { display: flex; gap: 8px; height: 132px; }
+  .sv-box {
+    position: relative; flex: 1; height: 100%; border-radius: 7px; cursor: crosshair;
+    touch-action: none; border: 1px solid var(--border);
+  }
+  .sv-cur {
+    position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+    transform: translate(-50%, -50%); pointer-events: none;
+  }
+  .hue-box {
+    position: relative; width: 14px; height: 100%; border-radius: 7px;
+    cursor: pointer; touch-action: none; border: 1px solid var(--border);
+    background: linear-gradient(to bottom,
+      #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%,
+      #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+  }
+  .hue-cur {
+    position: absolute; left: -3px; width: 20px; height: 9px; border-radius: 4px;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+    transform: translateY(-50%); pointer-events: none;
+  }
+
+  .rgb-lines { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
+  .rgb-line { display: flex; align-items: center; gap: 6px; }
+  .rgb-line .ch { width: 11px; font-size: 10px; font-weight: 700; color: var(--muted); text-align: center; }
+  .rgb-line input[type=range] { flex: 1; accent-color: var(--primary); height: 13px; }
+  .rgb-line .vv { width: 25px; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; }
+
+  /* 滤镜 */
+  .filt-line { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+  .filt-line .lb { width: 34px; font-size: 10.5px; color: var(--muted); flex: none; }
+  .filt-line input[type=range] { flex: 1; accent-color: var(--primary); height: 13px; }
+  .filt-line .vv { width: 34px; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; }
+
+  /* ═══ 底部 ═══ */
+  .dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: rgba(255,255,255,.95); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    padding: 9px 16px calc(9px + env(safe-area-inset-bottom));
+    display: flex; justify-content: center;
+  }
+  .dock-inner {
+    width: 100%; max-width: 1440px; display: flex; gap: 9px;
+    align-items: center; justify-content: flex-end;
+  }
+  .dock-note { margin-right: auto; font-size: 11px; color: var(--muted); }
+
+  .btn {
+    padding: 10px 20px; border-radius: 9px; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 650; transition: all .16s; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .btn.primary { background: var(--primary); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: var(--primary-dark); }
+  .btn.ghost { background: #eaeef6; color: var(--text); }
+  .btn.ghost:hover:not(:disabled) { background: #dfe5f0; }
+  .btn.capture { background: #fff; color: #0d1117; }
+  .btn.capture:hover { background: #e9edf5; }
+  .btn:disabled { opacity: .42; cursor: not-allowed; }
+  .btn .aro { font-size: 14px; line-height: 1; }
+
+  /* ═══ 弹层 ═══ */
+  .modal {
+    position: fixed; inset: 0; background: rgba(15, 22, 35, .55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 70; padding: 20px;
+  }
+  .modal-card {
+    background: #fff; border-radius: 16px; padding: 22px 20px;
+    width: 100%; max-width: 330px; text-align: center;
+    box-shadow: 0 16px 50px rgba(0,0,0,.26);
+    max-height: 92vh; overflow-y: auto;
+  }
+  .modal-card h3 { font-size: 16px; margin-bottom: 5px; }
+  .modal-card > p {
+    font-size: 11.5px; color: var(--muted); margin-bottom: 14px; line-height: 1.45;
+  }
+  .modal-preview {
+    display: flex; justify-content: center; margin-bottom: 16px;
+  }
+  .modal-preview canvas,
+  .modal-preview img {
+    max-width: 100%; max-height: 240px; border-radius: 8px;
+    box-shadow: 0 5px 18px rgba(15,25,45,.18); display: block;
+  }
+  .modal-card .btn { width: 100%; margin-bottom: 8px; justify-content: center; }
+  .btn.danger { background: #fdecec; color: #c0392b; }
+  .btn.danger:hover { background: #fbdada; }
+
+  /* ═══ 历史记录 ═══ */
+  .history-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  }
+  .history-item {
+    position: relative; border-radius: 6px; overflow: hidden; cursor: pointer;
+    border: 1px solid var(--border); background: #f2f5fa;
+    aspect-ratio: 295 / 413; transition: all .15s;
+  }
+  .history-item:hover { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(47,107,255,.15); }
+  .history-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .history-item .ts {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(8,12,20,.6); color: #fff;
+    font-size: 8px; padding: 2px 3px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .history-empty {
+    font-size: 10.5px; color: var(--muted); text-align: center;
+    padding: 14px 6px; line-height: 1.6;
+  }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 70px; transform: translate(-50%, 12px);
+    background: rgba(28, 36, 52, .95); color: #fff; font-size: 12px;
+    padding: 9px 15px; border-radius: 8px; z-index: 80;
+    opacity: 0; pointer-events: none; transition: all .22s; max-width: 84vw; text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.err { background: #c0392b; }
+
+  .hidden { display: none !important; }
+
+  /* ═══ 响应式 ═══ */
+  @media (max-width: 1180px) {
+    .workspace { grid-template-columns: 200px minmax(0, 1fr); }
+    .col-right { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  }
+  @media (max-width: 860px) {
+    body { padding: 10px 10px 72px; }
+    .workspace { grid-template-columns: 1fr; }
+    .col-right { grid-template-columns: 1fr; }
+    .stage { min-height: 62vh; }
+    .topbar { flex-wrap: wrap; gap: 8px; }
+    .hint-banner { order: 3; width: 100%; }
+    .top-actions { margin-left: auto; }
+    .dock-inner .btn { flex: 1; justify-content: center; }
+    .dock-note { display: none; }
+    .col-left { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .col-left .panel:first-child { grid-column: 1 / -1; }
+    .size-list { flex-direction: row; }
+    .size-item { flex: 1; }
+    .src-btn { width: 118px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ 顶栏 ═══ -->
+<div class="topbar">
+  <div class="brand">
+    <h1>证件照工作台</h1>
+    <span class="sub">本地处理 · 不上传</span>
+  </div>
+  <div class="hint-banner">
+    <span class="ico">💡</span>
+    <span>请在<b>单色背景</b>（如白墙）下拍摄，光线均匀，抠图与换底色效果更好</span>
+  </div>
+  <div class="top-actions">
+    <button class="btn ghost" id="btn-top-import">导入照片</button>
+  </div>
+</div>
+
+<!-- ═══ 三栏 ═══ -->
+<div class="workspace">
+
+  <!-- ── 左栏：尺寸 + 功能 ── -->
+  <div class="col col-left">
+    <section class="panel">
+      <h2>照片尺寸</h2>
+      <div class="size-list">
+        <div class="size-item on" data-size="1inch">
+          <span class="ico">📐</span>
+          <div class="txt">
+            <div class="n">一寸</div>
+            <div class="s">295×413 px · 25×35mm</div>
+          </div>
+          <span class="tick">✓</span>
+        </div>
+        <div class="size-item" data-size="2inch">
+          <span class="ico">📐</span>
+          <div class="txt">
+            <div class="n">二寸</div>
+            <div class="s">413×579 px · 35×49mm</div>
+          </div>
+          <span class="tick">✓</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>功能<span class="hint">自由勾选</span></h2>
+      <div class="feat-list">
+        <label class="feat on" id="feat-matting-wrap">
+          <input type="checkbox" id="feat-matting" checked />
+          <div class="txt">
+            <div class="t">人像抠图 <span class="badge">AI</span></div>
+            <div class="d">分离人像与原背景</div>
+          </div>
+        </label>
+
+        <label class="feat on" id="feat-bg-wrap">
+          <input type="checkbox" id="feat-bg" checked />
+          <div class="txt">
+            <div class="t">背景替换</div>
+            <div class="d">纯色底 / 自定义</div>
+          </div>
+        </label>
+
+        <label class="feat on" id="feat-resize-wrap">
+          <input type="checkbox" id="feat-resize" checked />
+          <div class="txt">
+            <div class="t">尺寸调整</div>
+            <div class="d">标准一寸 / 二寸</div>
+          </div>
+        </label>
+
+        <label class="feat" id="feat-filter-wrap">
+          <input type="checkbox" id="feat-filter" />
+          <div class="txt">
+            <div class="t">滤镜美化</div>
+            <div class="d">亮度 / 对比 / 磨皮</div>
+          </div>
+        </label>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── 中间：工作舞台（拍照 / 预览 / 编辑 同一块） ── -->
+  <div class="stage">
+    <div class="stage-head">
+      <span class="t" id="stage-title">上传照片</span>
+      <span class="dim" id="preview-dim"></span>
+    </div>
+
+    <div class="stage-body">
+      <!-- 空状态 -->
+      <div class="stage-empty" id="stage-empty">
+        <div class="empty-title">换背景 · 改尺寸 · <span>一键美化</span></div>
+        <div class="empty-sub">上传照片或直接拍照，在这里完成证件照制作</div>
+        <div class="src-actions">
+          <div class="src-btn primary-src" id="btn-camera">
+            <span class="emo">📷</span>
+            <span>拍照</span>
+            <span class="d">摄像头实时拍摄</span>
+          </div>
+          <div class="src-btn" id="btn-import">
+            <span class="emo">📁</span>
+            <span>导入照片</span>
+            <span class="d">JPG / PNG</span>
+          </div>
+        </div>
+        <div class="empty-tip">✨ 单色背景下拍摄，效果最好</div>
+      </div>
+
+      <!-- 摄像头状态 -->
+      <div class="stage-camera hidden" id="stage-camera">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <div class="cam-guide">
+          <div class="guide-frame" id="guide-frame"></div>
+        </div>
+        <div class="cam-hint" id="cam-hint">请将人脸对准框内，头顶留一点空白</div>
+        <div class="cam-bar">
+          <button class="btn ghost" id="btn-camera-cancel">取消</button>
+          <button class="btn capture" id="btn-capture">● 拍摄</button>
+        </div>
+      </div>
+
+      <!-- 结果状态 -->
+      <div class="stage-result hidden" id="stage-result">
+        <canvas id="preview-canvas" width="295" height="413"></canvas>
+        <div class="stage-tools">
+          <button class="mini-btn" id="btn-recapture">📷 重拍</button>
+          <button class="mini-btn" id="btn-change">📁 换照片</button>
+        </div>
+        <div class="checks" id="checks"></div>
+      </div>
+    </div>
+
+    <input type="file" id="file-input" accept="image/*" class="hidden" />
+  </div>
+
+  <!-- ── 右栏：背景色 + 滤镜 ── -->
+  <div class="col col-right">
+    <section class="panel" id="sub-bg">
+      <h2>背景颜色</h2>
+      <div class="presets">
+        <div class="preset" data-color="white">
+          <div class="sw" style="background:#fff"></div>
+          <div class="nm">标准白</div><div class="rgb">255·255·255</div>
+        </div>
+        <div class="preset" data-color="red">
+          <div class="sw" style="background:#f44242"></div>
+          <div class="nm">标准红</div><div class="rgb">244·66·66</div>
+        </div>
+        <div class="preset on" data-color="blue">
+          <div class="sw" style="background:#438edb"></div>
+          <div class="nm">标准蓝</div><div class="rgb">67·142·219</div>
+        </div>
+      </div>
+
+      <div class="palette-vert">
+        <div class="sv-box" id="sv-box"><div class="sv-cur" id="sv-cur"></div></div>
+        <div class="hue-box" id="hue-box"><div class="hue-cur" id="hue-cur"></div></div>
+      </div>
+
+      <div class="rgb-lines">
+        <div class="rgb-line"><span class="ch">R</span><input type="range" id="r-slider" min="0" max="255" value="67"><span class="vv" id="r-val">67</span></div>
+        <div class="rgb-line"><span class="ch">G</span><input type="range" id="g-slider" min="0" max="255" value="142"><span class="vv" id="g-val">142</span></div>
+        <div class="rgb-line"><span class="ch">B</span><input type="range" id="b-slider" min="0" max="255" value="219"><span class="vv" id="b-val">219</span></div>
+      </div>
+    </section>
+
+    <section class="panel" id="sub-filter" hidden>
+      <h2>滤镜参数</h2>
+      <div class="filt-line"><span class="lb">亮度</span><input type="range" id="f-bright" min="70" max="135" value="104"><span class="vv" id="f-bright-v">104%</span></div>
+      <div class="filt-line"><span class="lb">对比度</span><input type="range" id="f-contrast" min="70" max="140" value="104"><span class="vv" id="f-contrast-v">104%</span></div>
+      <div class="filt-line"><span class="lb">磨皮</span><input type="range" id="f-smooth" min="0" max="100" value="35"><span class="vv" id="f-smooth-v">35%</span></div>
+    </section>
+
+    <section class="panel" id="panel-history">
+      <h2>历史记录<span class="hint" id="history-count">0 / 10</span></h2>
+      <div class="history-grid" id="history-grid"></div>
+      <div class="history-empty" id="history-empty">
+        暂无记录<br />制作后点「继续」可保存，最多 10 张
+      </div>
+    </section>
+  </div>
+
+</div>
+
+<!-- ═══ 底部 ═══ -->
+<div class="dock">
+  <div class="dock-inner">
+    <span class="dock-note" id="dock-note">选择照片后可点「继续」</span>
+    <button class="btn ghost" id="btn-back" disabled><span class="aro">←</span> 返回</button>
+    <button class="btn primary" id="btn-continue" disabled>继续 <span class="aro">→</span></button>
+  </div>
+</div>
+
+<!-- 「继续」操作弹层 -->
+<div class="modal hidden" id="finish-modal">
+  <div class="modal-card">
+    <h3>完成</h3>
+    <p>可以保存到历史记录，或直接下载到本地</p>
+    <div class="modal-preview"><canvas id="finish-canvas"></canvas></div>
+    <button class="btn primary" id="btn-download">下载图片</button>
+    <button class="btn ghost" id="btn-save-history">保存到历史记录</button>
+    <button class="btn ghost" id="btn-finish-back">返回</button>
+  </div>
+</div>
+
+<!-- 历史记录查看弹层 -->
+<div class="modal hidden" id="history-modal">
+  <div class="modal-card">
+    <h3 id="history-title">历史记录</h3>
+    <p id="history-meta"></p>
+    <div class="modal-preview"><img id="history-big" alt="历史记录" /></div>
+    <button class="btn primary" id="btn-history-download">导出</button>
+    <button class="btn danger" id="btn-history-delete">删除</button>
+    <button class="btn ghost" id="btn-history-close">关闭</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* ══════════════════════════════════════════════════
+   常量
+   ══════════════════════════════════════════════════ */
+const SIZE_PRESETS = {
+  '1inch': { w: 295, h: 413, name: '一寸', spec: '25×35mm' },
+  '2inch': { w: 413, h: 579, name: '二寸', spec: '35×49mm' },
+};
+const COLOR_PRESETS = {
+  white: { r: 255, g: 255, b: 255, name: '标准白' },
+  red:   { r: 244, g: 66,  b: 66,  name: '标准红' },
+  blue:  { r: 67,  g: 142, b: 219, name: '标准蓝' },
+};
+// 构图参数，与 Python 版 main.py 保持一致
+const HEAD_TOP_ABOVE_FACE     = 0.45;
+const HEAD_TOP_MAX_ABOVE_FACE = 1.20;
+const HEAD_HEIGHT_RATIO       = 0.65;
+const TOP_MARGIN_RATIO        = 0.05;
+// 校验阈值
+const MIN_FG_RATIO = 0.02;
+const MAX_FG_RATIO = 0.985;
+const MIN_MASK_DIR = 0.85;
+
+const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const WASM_URL   = `${CDN}/wasm`;
+const SEG_MODEL  = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite';
+
+/* ══════════════════════════════════════════════════
+   状态
+   ══════════════════════════════════════════════════ */
+const state = {
+  stage: 'empty',          // empty | camera | result
+  sourceCanvas: null,
+  sourceName: '',
+  sourceW: 0,
+  sourceH: 0,
+  personMaskCanvas: null,
+  maskStats: null,
+  faceBox: null,
+  mattingReady: false,
+  segmenterFailed: false,
+  cropFit: 1,
+
+  feat: { matting: true, background: true, resize: true, filter: false },
+  size: '1inch',
+  color: { ...COLOR_PRESETS.blue },
+  colorName: 'blue',
+  filter: { brightness: 104, contrast: 104, smooth: 35 },
+
+  exporting: false,
+  stream: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ══════════════════════════════════════════════════
+   小工具
+   ══════════════════════════════════════════════════ */
+let toastTimer = null;
+function toast(msg, isErr = false) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.toggle('err', isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), isErr ? 4200 : 2200);
+}
+function rgbToCss({ r, g, b }) {
+  return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+}
+function hsvToRgb(h, s, v) {
+  h = ((h % 360) + 360) % 360;
+  const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return { r: (r + m) * 255, g: (g + m) * 255, b: (b + m) * 255 };
+}
+function rgbToHsv({ r, g, b }) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d !== 0) {
+    if (mx === r) h = 60 * (((g - b) / d) % 6);
+    else if (mx === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  }
+  if (h < 0) h += 360;
+  return { h, s: mx === 0 ? 0 : d / mx, v: mx };
+}
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+/* ══════════════════════════════════════════════════
+   舞台状态切换（拍照 / 预览 / 编辑 共用同一块区域）
+   ══════════════════════════════════════════════════ */
+function setStage(mode) {
+  state.stage = mode;
+  $('stage-empty').classList.toggle('hidden', mode !== 'empty');
+  $('stage-camera').classList.toggle('hidden', mode !== 'camera');
+  $('stage-result').classList.toggle('hidden', mode !== 'result');
+
+  const titles = { empty: '上传照片', camera: '拍照', result: '证件照预览' };
+  $('stage-title').textContent = titles[mode] || '';
+
+  // 引导框比例跟随当前尺寸
+  const p = SIZE_PRESETS[state.size];
+  $('guide-frame').style.aspectRatio = `${p.w} / ${p.h}`;
+}
+
+/* ══════════════════════════════════════════════════
+   素材获取
+   ══════════════════════════════════════════════════ */
+async function openCamera() {
+  setStage('camera');
+  const video = $('camera-video');
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStage(state.sourceCanvas ? 'result' : 'empty');
+    toast('当前浏览器不支持摄像头（需 HTTPS 或 localhost），请改用「导入照片」', true);
+    return;
+  }
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false,
+    });
+    video.srcObject = state.stream;
+    await video.play().catch(() => {});
+  } catch (err) {
+    cancelCamera();
+    const n = err?.name || '';
+    if (n === 'NotAllowedError' || n === 'SecurityError')
+      toast('摄像头权限被拒绝，请在地址栏允许访问，或改用「导入照片」', true);
+    else if (n === 'NotFoundError' || n === 'DevicesNotFoundError')
+      toast('未检测到摄像头设备，请改用「导入照片」', true);
+    else if (n === 'NotReadableError')
+      toast('摄像头被其他程序占用，请关闭后重试', true);
+    else
+      toast('打开摄像头失败：' + (err?.message || err), true);
+  }
+}
+
+function stopStream() {
+  if (state.stream) {
+    state.stream.getTracks().forEach((t) => t.stop());
+    state.stream = null;
+  }
+  $('camera-video').srcObject = null;
+}
+
+/** 取消拍照：有照片就回结果页，没有就回空状态 */
+function cancelCamera() {
+  stopStream();
+  setStage(state.sourceCanvas ? 'result' : 'empty');
+}
+
+function captureFromVideo() {
+  const v = $('camera-video');
+  if (!v.videoWidth) { toast('摄像头尚未就绪，请稍候', true); return; }
+  const c = makeCanvas(v.videoWidth, v.videoHeight);
+  const ctx = c.getContext('2d');
+  // 与预览保持一致：水平翻转回真实方向（伸左手就是左手）
+  ctx.translate(c.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(v, 0, 0);
+  stopStream();
+  adoptSource(c, '摄像头拍摄');
+}
+
+function importFile(file) {
+  if (!file) return;
+  if (!file.type || !file.type.startsWith('image/')) {
+    toast('请选择图片文件（JPG / PNG / WEBP）', true);
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const c = makeCanvas(img.naturalWidth, img.naturalHeight);
+    c.getContext('2d').drawImage(img, 0, 0);
+    state.lastAction = 'import';
+    adoptSource(c, file.name);
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    toast('图片读取失败，文件可能已损坏', true);
+  };
+  img.src = url;
+}
+
+async function adoptSource(canvas, name) {
+  state.sourceCanvas = canvas;
+  state.sourceW = canvas.width;
+  state.sourceH = canvas.height;
+  state.sourceName = name;
+  state.personMaskCanvas = null;
+  state.maskStats = null;
+  state.mattingReady = false;
+  state.segmenterFailed = false;
+  state.faceBox = null;
+  state.cropFit = 1;
+
+  setStage('result');
+  $('btn-continue').disabled = false;
+  $('btn-back').disabled = false;
+  $('dock-note').textContent = '可自由调整背景色，预览实时更新';
+
+  render();
+  await analyze();
+  render();
+}
+
+/* ══════════════════════════════════════════════════
+   人像分割 + 人脸检测
+   ══════════════════════════════════════════════════ */
+async function analyze() {
+  setChecks([{ type: 'warn', text: '正在加载人像分割模型…（首次需数秒）' }]);
+  try {
+    const task = await import(`${CDN}/vision_bundle.mjs`);
+    const { FilesetResolver, ImageSegmenter, FaceDetector } = task;
+    const vision = await FilesetResolver.forVisionTasks(WASM_URL);
+
+    const segmenter = await createModel(ImageSegmenter, vision, {
+      baseOptions: { modelAssetPath: SEG_MODEL },
+      runningMode: 'IMAGE',
+      outputCategoryMask: false,
+      outputConfidenceMasks: true,
+    });
+
+    setChecks([{ type: 'warn', text: '正在分离人像与背景…' }]);
+    const seg = segmenter.segment(state.sourceCanvas);
+    const extracted = extractPersonMask(seg);
+    state.personMaskCanvas = extracted;
+    state.maskStats = extracted?.stats || null;
+    state.mattingReady = !!state.personMaskCanvas;
+
+    try { seg.close?.(); } catch (_) {}
+    try { segmenter.close(); } catch (_) {}
+
+    try {
+      const detector = await createModel(FaceDetector, vision, {
+        baseOptions: { modelAssetPath: FACE_MODEL },
+        runningMode: 'IMAGE',
+      });
+      const faces = detector.detect(state.sourceCanvas);
+      if (faces?.detections?.length) {
+        let best = null;
+        for (const d of faces.detections) {
+          const bb = d.boundingBox;
+          if (!bb) continue;
+          if (!best || bb.width * bb.height > best.width * best.height) best = bb;
+        }
+        if (best) {
+          state.faceBox = { x: best.originX, y: best.originY, w: best.width, h: best.height };
+        }
+      }
+      detector.close();
+    } catch (_) {
+      state.faceBox = null;
+    }
+  } catch (err) {
+    state.segmenterFailed = true;
+    state.personMaskCanvas = null;
+    state.maskStats = null;
+    state.mattingReady = false;
+    setChecks([{
+      type: 'bad',
+      text: '人像分割模型加载失败：' + (err?.message || err) + '。已暂停抠图。',
+    }]);
+    if (state.feat.matting) {
+      state.feat.matting = false;
+      $('feat-matting').checked = false;
+      syncFeatStyles();
+    }
+  }
+}
+
+async function createModel(ModelClass, vision, opts) {
+  for (const delegate of ['GPU', 'CPU']) {
+    try {
+      return await ModelClass.createFromOptions(vision, {
+        ...opts,
+        baseOptions: { ...opts.baseOptions, delegate },
+      });
+    } catch (e) {
+      if (delegate === 'CPU') throw e;
+    }
+  }
+}
+
+/**
+ * 提取**人像**掩膜
+ * MediaPipe selfie_segmenter：index 0 = background，index 1 = person
+ */
+function extractPersonMask(segResult) {
+  const masks = segResult?.confidenceMasks;
+  if (!masks || masks.length === 0) return null;
+
+  let mask = masks.length >= 2 ? masks[1] : masks[0];
+  const mw = mask.width, mh = mask.height;
+  let data = mask.getAsFloat32Array();
+
+  if (masks.length < 2) {
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    if (sum / data.length > 0.6) data = data.map((v) => 1 - v);
+  }
+
+  const c = makeCanvas(mw, mh);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(mw, mh);
+  const px = img.data;
+  for (let i = 0; i < data.length; i++) {
+    const a = Math.max(0, Math.min(1, data[i]));
+    px[i * 4] = 255;
+    px[i * 4 + 1] = 255;
+    px[i * 4 + 2] = 255;
+    px[i * 4 + 3] = Math.round(a * 255);
+  }
+  ctx.putImageData(img, 0, 0);
+
+  return { canvas: c, width: mw, height: mh, stats: centerEdgeStats(data, mw, mh) };
+}
+
+/** 掩膜在「中央」与「边缘」的覆盖率之比，用于识别是否取到背景掩膜 */
+function centerEdgeStats(data, w, h) {
+  const cy0 = Math.floor(h * 0.30), cy1 = Math.floor(h * 0.70);
+  const cx0 = Math.floor(w * 0.30), cx1 = Math.floor(w * 0.70);
+  const b = Math.max(1, Math.floor(Math.min(w, h) * 0.12));
+
+  let cSum = 0, cN = 0, eSum = 0, eN = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = data[y * w + x] > 0.5 ? 1 : 0;
+      if (y >= cy0 && y < cy1 && x >= cx0 && x < cx1) { cSum += v; cN++; }
+      const onEdge = y < b || y >= h - b || x < b || x >= w - b;
+      if (onEdge) { eSum += v; eN++; }
+    }
+  }
+  const center = cN ? cSum / cN : 0;
+  const edge = eN ? eSum / eN : 0;
+  return { center, edge, ratio: center / Math.max(edge, 1e-6) };
+}
+
+/* ══════════════════════════════════════════════════
+   裁剪框
+   ══════════════════════════════════════════════════ */
+function findPersonTop(face) {
+  if (!state.personMaskCanvas) return null;
+  const { canvas, width: mw, height: mh } = state.personMaskCanvas;
+  const data = canvas.getContext('2d', { willReadFrequently: true })
+    .getImageData(0, 0, mw, mh).data;
+
+  const sx0 = Math.max(0, Math.floor((face.x - 0.35 * face.w) / state.sourceW * mw));
+  const sx1 = Math.min(mw, Math.ceil((face.x + 1.35 * face.w) / state.sourceW * mw));
+
+  for (let my = 0; my < mh; my++) {
+    for (let mx = sx0; mx < sx1; mx++) {
+      if (data[(my * mw + mx) * 4 + 3] > 128) return (my / mh) * state.sourceH;
+    }
+  }
+  return null;
+}
+
+function computeCropBox() {
+  let face = state.faceBox;
+  if (!face) {
+    const fw = state.sourceW * 0.40;
+    face = {
+      x: state.sourceW / 2 - fw / 2,
+      y: state.sourceH / 2 - fw / 2,
+      w: fw, h: fw,
+    };
+  }
+  const aspect = state.feat.resize
+    ? SIZE_PRESETS[state.size].w / SIZE_PRESETS[state.size].h
+    : 0.714;
+
+  let headTop = face.y - HEAD_TOP_ABOVE_FACE * face.h;
+  const personTop = findPersonTop(face);
+  if (personTop != null) {
+    headTop = Math.max(personTop, face.y - HEAD_TOP_MAX_ABOVE_FACE * face.h);
+  }
+  const chin = face.y + face.h;
+
+  let cropH = (chin - headTop) / HEAD_HEIGHT_RATIO;
+  let cropW = cropH * aspect;
+
+  /* 把裁剪框约束在原图之内：越界会露出 canvas 底色，
+     表现为"人像被一条直线切断、下面多一条纯色带" */
+  const W = state.sourceW, H = state.sourceH;
+  const fit = Math.min(1, W / cropW, H / cropH);
+  state.cropFit = fit;
+  cropH *= fit;
+  cropW *= fit;
+
+  let cropX = (face.x + face.w / 2) - cropW / 2;
+  let cropY = headTop - TOP_MARGIN_RATIO * cropH;
+
+  cropX = Math.min(Math.max(0, cropX), Math.max(0, W - cropW));
+  cropY = Math.min(Math.max(0, cropY), Math.max(0, H - cropH));
+
+  return { x: cropX, y: cropY, w: cropW, h: cropH };
+}
+
+/* ══════════════════════════════════════════════════
+   合成
+   ══════════════════════════════════════════════════ */
+function outputSize() {
+  if (state.feat.resize) {
+    const p = SIZE_PRESETS[state.size];
+    return { w: p.w, h: p.h };
+  }
+  const crop = computeCropBox();
+  return {
+    w: Math.max(1, Math.round(crop.w)),
+    h: Math.max(1, Math.round(crop.h)),
+  };
+}
+
+function buildForeground(outW, outH, crop) {
+  const fg = makeCanvas(outW, outH);
+  const ctx = fg.getContext('2d');
+  ctx.drawImage(state.sourceCanvas, crop.x, crop.y, crop.w, crop.h, 0, 0, outW, outH);
+
+  if (state.feat.matting && state.personMaskCanvas) {
+    const { canvas: maskCanvas, width: mw, height: mh } = state.personMaskCanvas;
+    const scaled = makeCanvas(outW, outH);
+    scaled.getContext('2d').drawImage(
+      maskCanvas,
+      (crop.x / state.sourceW) * mw,
+      (crop.y / state.sourceH) * mh,
+      (crop.w / state.sourceW) * mw,
+      (crop.h / state.sourceH) * mh,
+      0, 0, outW, outH
+    );
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(scaled, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  if (state.feat.filter) return applyFilter(fg);
+  return fg;
+}
+
+function applyFilter(src) {
+  const { brightness, contrast, smooth } = state.filter;
+  const out = makeCanvas(src.width, src.height);
+  const ctx = out.getContext('2d');
+
+  ctx.filter = `brightness(${brightness}%) contrast(${contrast}%)`;
+  ctx.drawImage(src, 0, 0);
+  ctx.filter = 'none';
+
+  if (smooth > 0) {
+    const blurCanvas = makeCanvas(src.width, src.height);
+    const bctx = blurCanvas.getContext('2d');
+    bctx.filter = `blur(${(0.8 + smooth / 100 * 2.2).toFixed(2)}px)`;
+    bctx.drawImage(out, 0, 0);
+    ctx.globalAlpha = (smooth / 100) * 0.55;
+    ctx.drawImage(blurCanvas, 0, 0);
+    ctx.globalAlpha = 1;
+  }
+  return out;
+}
+
+function compose() {
+  if (!state.sourceCanvas) return null;
+
+  const crop = computeCropBox();
+  const { w: outW, h: outH } = outputSize();
+  const fg = buildForeground(outW, outH, crop);
+
+  const out = makeCanvas(outW, outH);
+  const ctx = out.getContext('2d');
+  if (state.feat.background) {
+    ctx.fillStyle = rgbToCss(state.color);
+    ctx.fillRect(0, 0, outW, outH);
+  }
+  ctx.drawImage(fg, 0, 0);
+
+  return { canvas: out, fg, fgRatio: opaqueRatio(fg) };
+}
+
+function opaqueRatio(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  let n = 0;
+  const total = canvas.width * canvas.height;
+  for (let i = 3; i < data.length; i += 4) if (data[i] > 128) n++;
+  return n / total;
+}
+
+/* ══════════════════════════════════════════════════
+   预览 + 校验
+   ══════════════════════════════════════════════════ */
+let renderQueued = false;
+function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    doRender();
+  });
+}
+
+function doRender() {
+  if (state.stage !== 'result') return;
+
+  const result = compose();
+  if (!result) return;
+
+  const { canvas, fgRatio } = result;
+  const pv = $('preview-canvas');
+
+  pv.width = canvas.width;
+  pv.height = canvas.height;
+  pv.getContext('2d').drawImage(canvas, 0, 0);
+
+  // 适配舞台：按容器可用空间等比缩放（扣掉 padding 与底部校验条）
+  const holder = pv.parentElement;
+  const availW = holder.clientWidth - 32;
+  const availH = holder.clientHeight - 74;
+  const scale = Math.min(availW / canvas.width, availH / canvas.height, 2.4);
+  pv.style.width = Math.round(canvas.width * scale) + 'px';
+  pv.style.height = Math.round(canvas.height * scale) + 'px';
+
+  const checks = buildChecks(result);
+  setChecks(checks);
+  $('preview-dim').textContent = `${canvas.width} × ${canvas.height}`;
+  $('btn-continue').disabled = !checks.every((c) => c.type !== 'bad');
+}
+
+function buildChecks(result) {
+  const checks = [];
+  const { canvas, fgRatio } = result;
+
+  if (state.feat.matting && state.feat.background) {
+    if (fgRatio < MIN_FG_RATIO) {
+      checks.push({
+        type: 'bad',
+        text: `✕ 人像图层异常（仅 ${(fgRatio * 100).toFixed(1)}%），导出会只剩背景色`,
+      });
+    } else if (state.maskStats && state.maskStats.ratio < MIN_MASK_DIR) {
+      checks.push({
+        type: 'bad',
+        text: `✕ 掩膜方向异常（中心/边缘 ${state.maskStats.ratio.toFixed(2)}），已阻止导出`,
+      });
+    } else if (fgRatio > MAX_FG_RATIO) {
+      checks.push({ type: 'warn', text: '⚠ 抠图几乎未生效，可能是纯色背景图' });
+    } else {
+      checks.push({
+        type: 'ok',
+        text: `✓ 人像完整 · 覆盖 ${(fgRatio * 100).toFixed(0)}% · ${canvas.width}×${canvas.height}`,
+      });
+    }
+  } else if (state.feat.background && !state.feat.matting) {
+    checks.push({ type: 'warn', text: '⚠ 未启用抠图，背景色会被原图遮住' });
+  }
+
+  if (state.cropFit < 0.995) {
+    checks.push({
+      type: 'warn',
+      text: `⚠ 取景过近，裁剪已压缩到 ${(state.cropFit * 100).toFixed(0)}%，后退重拍构图更标准`,
+    });
+  }
+
+  if (!state.faceBox) {
+    checks.push({ type: 'warn', text: '⚠ 未检测到人脸，已按画面中心构图' });
+  }
+
+  return checks;
+}
+
+function setChecks(list) {
+  const box = $('checks');
+  box.innerHTML = '';
+  for (const c of list) {
+    const d = document.createElement('div');
+    d.className = 'check ' + c.type;
+    d.textContent = c.text;
+    box.appendChild(d);
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   继续 → 完成弹层 → 下载 / 存历史
+   ══════════════════════════════════════════════════ */
+function safeFileName() {
+  const sizeName = state.feat.resize ? SIZE_PRESETS[state.size].name : 'custom';
+  const colorName = state.colorName || 'custom';
+  return `证件照_${sizeName}_${colorName}`;
+}
+
+/** 点「继续」：校验并打开操作弹层 */
+function openFinish() {
+  if (!state.sourceCanvas) { toast('请先选择照片', true); return; }
+
+  const result = compose();
+  if (!result) { toast('合成失败，未生成有效图像', true); return; }
+
+  const checks = buildChecks(result);
+  const bad = checks.find((c) => c.type === 'bad');
+  if (bad) {
+    setChecks(checks);
+    toast(bad.text.replace(/^✕\s*/, ''), true);
+    return;
+  }
+
+  const fc = $('finish-canvas');
+  fc.width = result.canvas.width;
+  fc.height = result.canvas.height;
+  fc.getContext('2d').drawImage(result.canvas, 0, 0);
+
+  $('finish-modal').classList.remove('hidden');
+}
+
+function closeFinish() { $('finish-modal').classList.add('hidden'); }
+
+/** 下载当前成品到本地 */
+async function downloadCurrent() {
+  if (state.exporting) return;
+  if (!state.sourceCanvas) { toast('请先选择照片', true); return; }
+
+  state.exporting = true;
+  $('btn-download').disabled = true;
+
+  try {
+    const result = compose();
+    if (!result) throw new Error('合成失败，未生成有效图像');
+
+    const checks = buildChecks(result);
+    const bad = checks.find((c) => c.type === 'bad');
+    if (bad) {
+      setChecks(checks);
+      toast('人像图层校验未通过，已阻止导出', true);
+      return;
+    }
+
+    const blob = await canvasToBlob(result.canvas);
+    if (!blob) throw new Error('图片编码失败');
+    await verifyBlob(blob);
+
+    triggerDownload(URL.createObjectURL(blob), safeFileName() + '.jpg', 4000);
+    toast('已开始下载');
+  } catch (err) {
+    toast('导出失败：' + (err?.message || err), true);
+  } finally {
+    state.exporting = false;
+    $('btn-download').disabled = false;
+  }
+}
+
+function triggerDownload(href, filename, revokeAfter) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  if (revokeAfter) setTimeout(() => URL.revokeObjectURL(href), revokeAfter);
+}
+
+/* ══════════════════════════════════════════════════
+   历史记录（最多 10 张，存 localStorage）
+   ══════════════════════════════════════════════════ */
+const HISTORY_KEY = 'idphoto_history_v1';
+const HISTORY_MAX = 10;
+let history = [];
+let viewingHistoryId = null;
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    history = Array.isArray(parsed) ? parsed.slice(0, HISTORY_MAX) : [];
+  } catch (_) {
+    history = [];
+  }
+  renderHistory();
+}
+
+function persistHistory() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    return true;
+  } catch (_) {
+    return false;   // 配额超限
+  }
+}
+
+function renderHistory() {
+  const grid = $('history-grid');
+  grid.innerHTML = '';
+  $('history-count').textContent = `${history.length} / ${HISTORY_MAX}`;
+  $('history-empty').classList.toggle('hidden', history.length > 0);
+
+  history.forEach((item) => {
+    const d = document.createElement('div');
+    d.className = 'history-item';
+    d.title = '点击可导出或删除';
+
+    const img = document.createElement('img');
+    img.src = item.dataUrl;
+    img.alt = '历史证件照';
+
+    const ts = document.createElement('div');
+    ts.className = 'ts';
+    ts.textContent = item.time;
+
+    d.appendChild(img);
+    d.appendChild(ts);
+    d.addEventListener('click', () => openHistoryView(item.id));
+    grid.appendChild(d);
+  });
+}
+
+/** 把当前成品存入历史，超出 10 张丢弃最旧的 */
+function saveCurrentToHistory() {
+  if (!state.sourceCanvas) { toast('请先选择照片', true); return; }
+
+  const result = compose();
+  if (!result) { toast('合成失败', true); return; }
+
+  const checks = buildChecks(result);
+  const bad = checks.find((c) => c.type === 'bad');
+  if (bad) { setChecks(checks); toast('人像校验未通过，无法保存', true); return; }
+
+  // 质量 0.82：单张约 20~30KB，10 张不会撑爆 localStorage
+  const dataUrl = result.canvas.toDataURL('image/jpeg', 0.82);
+  const item = {
+    id: Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    dataUrl,
+    size: state.feat.resize ? SIZE_PRESETS[state.size].name : 'custom',
+    color: state.colorName || 'custom',
+    w: result.canvas.width,
+    h: result.canvas.height,
+    time: new Date().toLocaleString('zh-CN', {
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    }),
+  };
+
+  history.unshift(item);
+  if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
+
+  if (!persistHistory()) {
+    history = history.filter((h) => h.id !== item.id);  // 回滚
+    toast('浏览器存储空间不足，保存失败', true);
+    return;
+  }
+
+  renderHistory();
+  closeFinish();
+  toast('已保存到历史记录');
+}
+
+function openHistoryView(id) {
+  const item = history.find((h) => h.id === id);
+  if (!item) return;
+  viewingHistoryId = id;
+  $('history-big').src = item.dataUrl;
+  $('history-title').textContent = `历史记录 · ${item.size}`;
+  $('history-meta').textContent = `${item.color} · ${item.w}×${item.h} · ${item.time}`;
+  $('history-modal').classList.remove('hidden');
+}
+
+function closeHistoryView() {
+  $('history-modal').classList.add('hidden');
+  viewingHistoryId = null;
+}
+
+function downloadHistoryItem() {
+  const item = history.find((h) => h.id === viewingHistoryId);
+  if (!item) return;
+  triggerDownload(item.dataUrl, `证件照_${item.size}_${item.color}.jpg`, 0);
+  toast('已开始下载');
+}
+
+function deleteHistoryItem() {
+  const before = history.length;
+  history = history.filter((h) => h.id !== viewingHistoryId);
+  if (history.length === before) return;
+  persistHistory();
+  renderHistory();
+  closeHistoryView();
+  toast('已删除');
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve) => {
+    if (canvas.toBlob) {
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.95);
+    } else {
+      try {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        const bin = atob(dataUrl.split(',')[1]);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        resolve(new Blob([arr], { type: 'image/jpeg' }));
+      } catch (_) {
+        resolve(null);
+      }
+    }
+  });
+}
+
+function verifyBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(true); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('导出的图片无法解码')); };
+    img.src = url;
+  });
+}
+
+/* ══════════════════════════════════════════════════
+   功能勾选
+   ══════════════════════════════════════════════════ */
+function syncFeatStyles() {
+  const map = [
+    ['feat-matting', 'feat-matting-wrap'],
+    ['feat-bg', 'feat-bg-wrap'],
+    ['feat-resize', 'feat-resize-wrap'],
+    ['feat-filter', 'feat-filter-wrap'],
+  ];
+  for (const [cb, wrap] of map) $(wrap).classList.toggle('on', $(cb).checked);
+  $('sub-bg').hidden = !state.feat.background;
+  $('sub-filter').hidden = !state.feat.filter;
+}
+
+function bindFeature(cbId, key, onChange) {
+  $(cbId).addEventListener('change', (e) => {
+    state.feat[key] = e.target.checked;
+    syncFeatStyles();
+    if (onChange) onChange(e.target.checked);
+    render();
+  });
+}
+
+bindFeature('feat-matting', 'matting', (on) => {
+  if (on && state.segmenterFailed) toast('分割模型不可用，暂时无法启用抠图', true);
+});
+bindFeature('feat-bg', 'background');
+bindFeature('feat-resize', 'resize', () => {
+  // 尺寸变化时同步取景框比例（拍照态也能正确显示）
+  const p = SIZE_PRESETS[state.size];
+  $('guide-frame').style.aspectRatio = `${p.w} / ${p.h}`;
+});
+bindFeature('feat-filter', 'filter');
+
+/* ══════════════════════════════════════════════════
+   颜色：竖向调色板
+   ══════════════════════════════════════════════════ */
+let hue = 0, sat = 0, val = 0;
+
+function updateSVBg() {
+  $('sv-box').style.background =
+    `linear-gradient(to top, #000, rgba(0,0,0,0)), ` +
+    `linear-gradient(to right, #fff, hsl(${hue},100%,50%))`;
+}
+function placeCursors() {
+  $('sv-cur').style.left = (sat * 100) + '%';
+  $('sv-cur').style.top = ((1 - val) * 100) + '%';
+  $('hue-cur').style.top = (hue / 360 * 100) + '%';
+}
+
+function setColor(rgb, silent) {
+  state.color = { r: rgb.r, g: rgb.g, b: rgb.b };
+  $('r-slider').value = Math.round(rgb.r); $('r-val').textContent = Math.round(rgb.r);
+  $('g-slider').value = Math.round(rgb.g); $('g-val').textContent = Math.round(rgb.g);
+  $('b-slider').value = Math.round(rgb.b); $('b-val').textContent = Math.round(rgb.b);
+
+  let match = null;
+  document.querySelectorAll('.preset').forEach((p) => {
+    const c = COLOR_PRESETS[p.dataset.color];
+    const same = Math.round(c.r) === Math.round(rgb.r)
+      && Math.round(c.g) === Math.round(rgb.g)
+      && Math.round(c.b) === Math.round(rgb.b);
+    p.classList.toggle('on', same);
+    if (same) match = p.dataset.color;
+  });
+  state.colorName = match;
+
+  const hsv = rgbToHsv(rgb);
+  hue = hsv.h; sat = hsv.s; val = hsv.v;
+  updateSVBg(); placeCursors();
+
+  if (!silent) render();
+}
+function applyHSV() { setColor(hsvToRgb(hue, sat, val)); }
+
+function bindDrag(el, handler) {
+  const point = (e) => (e.touches ? e.touches[0] : e);
+  const onDown = (e) => {
+    handler(point(e));
+    const mv = (ev) => handler(point(ev));
+    const up = () => {
+      window.removeEventListener('mousemove', mv);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('touchmove', mv);
+      window.removeEventListener('touchend', up);
+    };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchmove', mv, { passive: false });
+    window.addEventListener('touchend', up);
+    e.preventDefault();
+  };
+  el.addEventListener('mousedown', onDown);
+  el.addEventListener('touchstart', onDown, { passive: false });
+}
+
+bindDrag($('sv-box'), (p) => {
+  const r = $('sv-box').getBoundingClientRect();
+  sat = Math.min(1, Math.max(0, (p.clientX - r.left) / r.width));
+  val = Math.min(1, Math.max(0, 1 - (p.clientY - r.top) / r.height));
+  placeCursors(); applyHSV();
+});
+
+bindDrag($('hue-box'), (p) => {
+  const r = $('hue-box').getBoundingClientRect();
+  hue = Math.min(1, Math.max(0, (p.clientY - r.top) / r.height)) * 360;
+  placeCursors(); applyHSV();
+});
+
+[['r', 'r-slider', 'r-val'], ['g', 'g-slider', 'g-val'], ['b', 'b-slider', 'b-val']]
+  .forEach(([ch, slider, out]) => {
+    $(slider).addEventListener('input', () => {
+      $(out).textContent = $(slider).value;
+      const rgb = {
+        r: +$('r-slider').value,
+        g: +$('g-slider').value,
+        b: +$('b-slider').value,
+      };
+      state.color = rgb;
+      const hsv = rgbToHsv(rgb);
+      hue = hsv.h; sat = hsv.s; val = hsv.v;
+      updateSVBg(); placeCursors();
+      document.querySelectorAll('.preset').forEach((p) => p.classList.remove('on'));
+      state.colorName = null;
+      render();
+    });
+  });
+
+document.querySelectorAll('.preset').forEach((p) => {
+  p.addEventListener('click', () => setColor(COLOR_PRESETS[p.dataset.color]));
+});
+
+/* ══════════════════════════════════════════════════
+   尺寸 / 滤镜
+   ══════════════════════════════════════════════════ */
+document.querySelectorAll('.size-item').forEach((item) => {
+  item.addEventListener('click', () => {
+    state.size = item.dataset.size;
+    document.querySelectorAll('.size-item').forEach((o) => o.classList.toggle('on', o === item));
+    setStage(state.stage);   // 刷新取景框比例
+    render();
+  });
+});
+
+[['f-bright', 'brightness', 'f-bright-v'],
+ ['f-contrast', 'contrast', 'f-contrast-v'],
+ ['f-smooth', 'smooth', 'f-smooth-v']].forEach(([id, key, outId]) => {
+  $(id).addEventListener('input', () => {
+    state.filter[key] = +$(id).value;
+    $(outId).textContent = $(id).value + '%';
+    render();
+  });
+});
+
+/* ══════════════════════════════════════════════════
+   重置 / 事件
+   ══════════════════════════════════════════════════ */
+function resetWorkspace() {
+  stopStream();
+  state.sourceCanvas = null;
+  state.personMaskCanvas = null;
+  state.maskStats = null;
+  state.mattingReady = false;
+  state.segmenterFailed = false;
+  state.faceBox = null;
+  state.cropFit = 1;
+
+  setStage('empty');
+  $('btn-continue').disabled = true;
+  $('btn-back').disabled = true;
+  $('dock-note').textContent = '选择照片后可点「继续」';
+  $('preview-dim').textContent = '';
+  const pv = $('preview-canvas');
+  pv.getContext('2d').clearRect(0, 0, pv.width, pv.height);
+  pv.style.width = '';
+  pv.style.height = '';
+  setChecks([]);
+}
+
+$('btn-camera').addEventListener('click', openCamera);
+$('btn-camera-cancel').addEventListener('click', cancelCamera);
+$('btn-capture').addEventListener('click', captureFromVideo);
+$('btn-import').addEventListener('click', () => $('file-input').click());
+$('btn-top-import').addEventListener('click', () => $('file-input').click());
+$('file-input').addEventListener('change', (e) => {
+  importFile(e.target.files?.[0]);
+  e.target.value = '';
+});
+$('btn-change').addEventListener('click', () => $('file-input').click());
+$('btn-recapture').addEventListener('click', openCamera);
+$('btn-back').addEventListener('click', () => {
+  resetWorkspace();
+  toast('已返回，可重新选择照片');
+});
+$('btn-continue').addEventListener('click', openFinish);
+$('btn-download').addEventListener('click', downloadCurrent);
+$('btn-save-history').addEventListener('click', saveCurrentToHistory);
+$('btn-finish-back').addEventListener('click', closeFinish);
+$('btn-history-download').addEventListener('click', downloadHistoryItem);
+$('btn-history-delete').addEventListener('click', deleteHistoryItem);
+$('btn-history-close').addEventListener('click', closeHistoryView);
+
+// 点弹层空白处关闭
+$('finish-modal').addEventListener('click', (e) => {
+  if (e.target === $('finish-modal')) closeFinish();
+});
+$('history-modal').addEventListener('click', (e) => {
+  if (e.target === $('history-modal')) closeHistoryView();
+});
+
+// Esc 关闭弹层
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('history-modal').classList.contains('hidden')) closeHistoryView();
+  else if (!$('finish-modal').classList.contains('hidden')) closeFinish();
+});
+
+// 尺寸变化时重算预览缩放
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(render, 120);
+});
+
+/* ══════════════════════════════════════════════════
+   初始化
+   ══════════════════════════════════════════════════ */
+syncFeatStyles();
+setColor(COLOR_PRESETS.blue, true);
+updateSVBg();
+placeCursors();
+setStage('empty');
+loadHistory();
+</script>
+</body>
+</html>

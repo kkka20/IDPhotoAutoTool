@@ -372,6 +372,55 @@
   .btn.danger { background: #fdecec; color: #c0392b; }
   .btn.danger:hover { background: #fbdada; }
 
+  /* ═══ 背景仓库 ═══ */
+  .bg-import {
+    width: 100%; justify-content: center; margin-bottom: 8px;
+    font-size: 11.5px; padding: 7px 10px;
+  }
+  .bg-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  }
+  .bg-item {
+    position: relative; border-radius: 6px; overflow: hidden; cursor: pointer;
+    border: 1.5px solid var(--border); background: #f2f5fa;
+    aspect-ratio: 3 / 4; transition: all .15s;
+  }
+  .bg-item:hover { border-color: #c2d3f8; }
+  .bg-item.on {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(47,107,255,.2);
+  }
+  .bg-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .bg-item .pure {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 650; letter-spacing: .3px;
+  }
+  .bg-item .del {
+    position: absolute; top: 2px; right: 2px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: rgba(8,12,20,.66); color: #fff;
+    font-size: 11px; line-height: 14px; text-align: center;
+    cursor: pointer; opacity: 0; transition: opacity .15s;
+  }
+  .bg-item:hover .del { opacity: 1; }
+  .bg-empty {
+    font-size: 10.5px; color: var(--muted); text-align: center;
+    padding: 10px 4px; line-height: 1.55;
+  }
+
+  /* 使用背景图时锁住颜色面板 */
+  #sub-bg.locked .presets,
+  #sub-bg.locked .palette-vert,
+  #sub-bg.locked .rgb-lines {
+    opacity: .35; pointer-events: none; filter: grayscale(.4);
+  }
+  .mode-note {
+    font-size: 10.5px; line-height: 1.5; color: #8a6d00;
+    background: #fff8e6; border: 1px dashed #ffd98a;
+    border-radius: 7px; padding: 7px 9px; margin-bottom: 10px;
+  }
+
   /* ═══ 历史记录 ═══ */
   .history-grid {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
@@ -508,6 +557,16 @@
         </label>
       </div>
     </section>
+
+    <section class="panel" id="panel-bg-lib">
+      <h2>背景仓库<span class="hint" id="bg-count">0 / 20</span></h2>
+      <button class="mini-btn bg-import" id="btn-bg-import">＋ 导入背景图</button>
+      <div class="bg-grid" id="bg-grid"></div>
+      <div class="bg-empty" id="bg-empty">
+        最多 20 张<br />选中后背景图在下、人像置顶
+      </div>
+      <input type="file" id="bg-file-input" accept="image/*" multiple class="hidden" />
+    </section>
   </div>
 
   <!-- ── 中间：工作舞台（拍照 / 预览 / 编辑 同一块） ── -->
@@ -568,6 +627,9 @@
   <div class="col col-right">
     <section class="panel" id="sub-bg">
       <h2>背景颜色</h2>
+      <div class="mode-note hidden" id="bg-mode-note">
+        已使用背景图片，颜色调节暂不可用。<br />点「背景仓库」里的「纯色」可切回。
+      </div>
       <div class="presets">
         <div class="preset" data-color="white">
           <div class="sw" style="background:#fff"></div>
@@ -703,6 +765,13 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+/* 背景仓库：最多 20 张，选中的背景图铺在最底层，人像永远叠在上面 */
+const BG_KEY = 'idphoto_bg_library_v1';
+const BG_MAX = 20;
+let backgrounds = [];
+let selectedBgId = null;
+const bgCache = new Map();   // id -> HTMLImageElement（已解码，供同步合成使用）
 
 /* ══════════════════════════════════════════════════
    小工具
@@ -1133,11 +1202,17 @@ function compose() {
 
   const out = makeCanvas(outW, outH);
   const ctx = out.getContext('2d');
+
   if (state.feat.background) {
-    ctx.fillStyle = rgbToCss(state.color);
-    ctx.fillRect(0, 0, outW, outH);
+    const bgImg = selectedBgId ? bgCache.get(selectedBgId) : null;
+    if (bgImg) {
+      drawCover(ctx, bgImg, outW, outH);   // 背景图铺在最底层
+    } else {
+      ctx.fillStyle = rgbToCss(state.color);
+      ctx.fillRect(0, 0, outW, outH);
+    }
   }
-  ctx.drawImage(fg, 0, 0);
+  ctx.drawImage(fg, 0, 0);                 // 人像永远叠在最上层
 
   return { canvas: out, fg, fgRatio: opaqueRatio(fg) };
 }
@@ -1225,6 +1300,10 @@ function buildChecks(result) {
     });
   }
 
+  if (selectedBgId) {
+    checks.push({ type: 'ok', text: '✓ 已使用背景图片，人像置顶' });
+  }
+
   if (!state.faceBox) {
     checks.push({ type: 'warn', text: '⚠ 未检测到人脸，已按画面中心构图' });
   }
@@ -1297,12 +1376,15 @@ async function downloadCurrent() {
       return;
     }
 
-    const blob = await canvasToBlob(result.canvas);
-    if (!blob) throw new Error('图片编码失败');
+    const raw = await canvasToBlob(result.canvas);
+    if (!raw) throw new Error('图片编码失败');
+
+    // 写入 300dpi，打印店打开时才会显示正确的物理尺寸
+    const blob = await withJpegDpi(raw, 300);
     await verifyBlob(blob);
 
     triggerDownload(URL.createObjectURL(blob), safeFileName() + '.jpg', 4000);
-    toast('已开始下载');
+    toast('已开始下载（300dpi）');
   } catch (err) {
     toast('导出失败：' + (err?.message || err), true);
   } finally {
@@ -1319,6 +1401,204 @@ function triggerDownload(href, filename, revokeAfter) {
   a.click();
   a.remove();
   if (revokeAfter) setTimeout(() => URL.revokeObjectURL(href), revokeAfter);
+}
+
+/* ══════════════════════════════════════════════════
+   背景仓库（最多 20 张，背景在下、人像置顶）
+   ══════════════════════════════════════════════════ */
+function loadBackgrounds() {
+  try {
+    const raw = localStorage.getItem(BG_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    backgrounds = Array.isArray(parsed) ? parsed.slice(0, BG_MAX) : [];
+  } catch (_) {
+    backgrounds = [];
+  }
+  renderBgGrid();
+  syncBgMode();
+}
+
+function persistBackgrounds() {
+  try {
+    localStorage.setItem(BG_KEY, JSON.stringify(backgrounds));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function luminance({ r, g, b }) {
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+function renderBgGrid() {
+  const grid = $('bg-grid');
+  grid.innerHTML = '';
+  $('bg-count').textContent = `${backgrounds.length} / ${BG_MAX}`;
+  $('bg-empty').classList.toggle('hidden', backgrounds.length > 0);
+
+  // 第一格：纯色（不选背景图）
+  const pure = document.createElement('div');
+  pure.className = 'bg-item' + (selectedBgId ? '' : ' on');
+  pure.title = '使用纯色背景';
+  const inner = document.createElement('div');
+  inner.className = 'pure';
+  inner.id = 'bg-pure-swatch';
+  inner.textContent = '纯色';
+  pure.appendChild(inner);
+  pure.addEventListener('click', () => selectBackground(null));
+  grid.appendChild(pure);
+  updatePureSwatch();
+
+  // 背景图
+  backgrounds.forEach((item) => {
+    const d = document.createElement('div');
+    d.className = 'bg-item' + (selectedBgId === item.id ? ' on' : '');
+
+    const img = document.createElement('img');
+    img.src = item.dataUrl;
+    img.alt = '背景图';
+
+    const del = document.createElement('div');
+    del.className = 'del';
+    del.textContent = '×';
+    del.title = '删除这张背景';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteBackground(item.id);
+    });
+
+    d.appendChild(img);
+    d.appendChild(del);
+    d.addEventListener('click', () => selectBackground(item.id));
+    grid.appendChild(d);
+  });
+}
+
+function updatePureSwatch() {
+  const el = $('bg-pure-swatch');
+  if (!el) return;
+  el.style.background = rgbToCss(state.color);
+  el.style.color = luminance(state.color) > 0.62 ? '#334' : '#fff';
+}
+
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.src = url;
+  });
+}
+
+function resizeToMax(img, maxSide) {
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const s = Math.min(1, maxSide / Math.max(iw, ih));
+  const c = makeCanvas(Math.round(iw * s), Math.round(ih * s));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c;
+}
+
+async function importBgFiles(files) {
+  const list = Array.from(files || []).filter((f) => f.type && f.type.startsWith('image/'));
+  if (list.length === 0) { toast('请选择图片文件（JPG / PNG）', true); return; }
+
+  let added = 0, failed = 0;
+  for (const f of list) {
+    if (backgrounds.length >= BG_MAX) {
+      toast(`背景仓库最多 ${BG_MAX} 张`, true);
+      break;
+    }
+    try {
+      const img = await loadImageFile(f);
+      // 压到 800px / 0.75：单张约 60~100KB，20 张不会撑爆 localStorage
+      const dataUrl = resizeToMax(img, 800).toDataURL('image/jpeg', 0.75);
+      backgrounds.unshift({
+        id: Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        dataUrl,
+        time: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit' }),
+      });
+      added++;
+    } catch (_) {
+      failed++;
+    }
+  }
+
+  if (backgrounds.length > BG_MAX) backgrounds = backgrounds.slice(0, BG_MAX);
+  const saved = persistBackgrounds();
+
+  renderBgGrid();
+  toast(`已导入 ${added} 张${failed ? `，${failed} 张失败` : ''}` +
+        (saved ? '' : '，存储空间不足、未能持久化'), !saved);
+  render();
+}
+
+function getBgImage(item) {
+  if (bgCache.has(item.id)) return Promise.resolve(bgCache.get(item.id));
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => { bgCache.set(item.id, img); resolve(img); };
+    img.onerror = () => resolve(null);
+    img.src = item.dataUrl;
+  });
+}
+
+async function selectBackground(id) {
+  if (id) {
+    const item = backgrounds.find((b) => b.id === id);
+    if (!item) return;
+
+    const img = await getBgImage(item);
+    if (!img) { toast('背景图加载失败', true); return; }
+
+    // 背景图要靠抠图才能露出来，自动补勾相关开关
+    let changed = false;
+    if (!state.feat.matting) {
+      state.feat.matting = true;
+      $('feat-matting').checked = true;
+      changed = true;
+    }
+    if (!state.feat.background) {
+      state.feat.background = true;
+      $('feat-bg').checked = true;
+      changed = true;
+    }
+    if (changed) syncFeatStyles();
+  }
+
+  selectedBgId = id;
+  renderBgGrid();
+  syncBgMode();
+  render();
+}
+
+function deleteBackground(id) {
+  backgrounds = backgrounds.filter((b) => b.id !== id);
+  bgCache.delete(id);
+  if (selectedBgId === id) selectedBgId = null;
+  persistBackgrounds();
+  renderBgGrid();
+  syncBgMode();
+  render();
+  toast('已删除背景');
+}
+
+/** 有背景图时锁住颜色调节 */
+function syncBgMode() {
+  const locked = !!selectedBgId;
+  $('sub-bg').classList.toggle('locked', locked);
+  $('bg-mode-note').classList.toggle('hidden', !locked);
+}
+
+/** 背景图按 cover 方式铺满输出尺寸（保持比例，居中裁切） */
+function drawCover(ctx, img, w, h) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+  const s = Math.max(w / iw, h / ih);
+  const dw = iw * s, dh = ih * s;
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
 }
 
 /* ══════════════════════════════════════════════════
@@ -1430,11 +1710,17 @@ function closeHistoryView() {
   viewingHistoryId = null;
 }
 
-function downloadHistoryItem() {
+async function downloadHistoryItem() {
   const item = history.find((h) => h.id === viewingHistoryId);
   if (!item) return;
-  triggerDownload(item.dataUrl, `证件照_${item.size}_${item.color}.jpg`, 0);
-  toast('已开始下载');
+  try {
+    const blob = await withJpegDpi(dataUrlToBlob(item.dataUrl), 300);
+    triggerDownload(URL.createObjectURL(blob),
+      `证件照_${item.size}_${item.color}.jpg`, 4000);
+    toast('已开始下载（300dpi）');
+  } catch (err) {
+    toast('导出失败：' + (err?.message || err), true);
+  }
 }
 
 function deleteHistoryItem() {
@@ -1473,6 +1759,91 @@ function verifyBlob(blob) {
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('导出的图片无法解码')); };
     img.src = url;
   });
+}
+
+/**
+ * 给 JPEG 写入 DPI 元数据。
+ *
+ * canvas.toBlob 生成的 JPEG 默认按 72dpi 记录密度。像素尺寸没问题，
+ * 但打印店的软件若按 DPI 换算物理尺寸，二寸 413×579 会被算成约 146mm 宽，
+ * 而不是标准的 35mm。这里直接改写 JFIF APP0 段里的密度字段为 300dpi，
+ * 打印时就能正确显示 25×35mm / 35×49mm。
+ *
+ * APP0 结构（相对段起点 i）：
+ *   i+0..1   FF E0
+ *   i+2..3   段长度
+ *   i+4..8   'JFIF\0'
+ *   i+9..10  版本号
+ *   i+11     units（1 = 每英寸像素数）
+ *   i+12..13 X 密度
+ *   i+14..15 Y 密度
+ */
+async function withJpegDpi(blob, dpi = 300) {
+  try {
+    const buf = new Uint8Array(await blob.arrayBuffer());
+
+    // 必须是 JPEG（SOI = FF D8）
+    if (buf.length < 4 || buf[0] !== 0xFF || buf[1] !== 0xD8) return blob;
+
+    // ── 优先：找到已有的 JFIF APP0，就地改写密度 ──
+    let i = 2;
+    while (i + 16 <= buf.length) {
+      if (buf[i] !== 0xFF) break;
+      const marker = buf[i + 1];
+
+      // SOI / EOI / RSTn 没有长度字段
+      if (marker === 0xD8 || marker === 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) {
+        i += 2;
+        continue;
+      }
+      // 压缩数据开始，再往后没有元数据段了
+      if (marker === 0xDA) break;
+
+      const len = (buf[i + 2] << 8) | buf[i + 3];
+      if (len < 2) break;
+
+      if (marker === 0xE0
+          && buf[i + 4] === 0x4A && buf[i + 5] === 0x46
+          && buf[i + 6] === 0x49 && buf[i + 7] === 0x46) {
+        buf[i + 11] = 1;                    // units = 1（英寸）
+        buf[i + 12] = (dpi >> 8) & 0xFF;    // X 密度高字节
+        buf[i + 13] = dpi & 0xFF;           // X 密度低字节
+        buf[i + 14] = (dpi >> 8) & 0xFF;    // Y 密度高字节
+        buf[i + 15] = dpi & 0xFF;           // Y 密度低字节
+        return new Blob([buf], { type: 'image/jpeg' });
+      }
+      i += 2 + len;
+    }
+
+    // ── 兜底：没有 JFIF 段（例如只有 Exif），在 SOI 后插入一段标准 APP0 ──
+    const app0 = new Uint8Array([
+      0xFF, 0xE0, 0x00, 0x10,              // marker + 段长度 16
+      0x4A, 0x46, 0x49, 0x46, 0x00,        // 'JFIF\0'
+      0x01, 0x01,                          // 版本 1.1
+      0x01,                                // units = 英寸
+      (dpi >> 8) & 0xFF, dpi & 0xFF,       // X 密度
+      (dpi >> 8) & 0xFF, dpi & 0xFF,       // Y 密度
+      0x00, 0x00,                          // 缩略图 0×0
+    ]);
+    const out = new Uint8Array(buf.length + app0.length);
+    out.set(buf.subarray(0, 2), 0);        // SOI
+    out.set(app0, 2);
+    out.set(buf.subarray(2), 2 + app0.length);
+    return new Blob([out], { type: 'image/jpeg' });
+  } catch (_) {
+    // 解析失败就返回原图，不影响下载
+  }
+  return blob;
+}
+
+/** dataURL → Blob（历史记录下载时用） */
+function dataUrlToBlob(dataUrl) {
+  const [head, b64] = dataUrl.split(',');
+  const mime = (head.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 /* ══════════════════════════════════════════════════
@@ -1546,6 +1917,7 @@ function setColor(rgb, silent) {
   const hsv = rgbToHsv(rgb);
   hue = hsv.h; sat = hsv.s; val = hsv.v;
   updateSVBg(); placeCursors();
+  updatePureSwatch();      // 背景仓库里的「纯色」格子跟着变色
 
   if (!silent) render();
 }
@@ -1666,6 +2038,13 @@ $('file-input').addEventListener('change', (e) => {
 });
 $('btn-change').addEventListener('click', () => $('file-input').click());
 $('btn-recapture').addEventListener('click', openCamera);
+
+// 背景仓库：导入 / 选择 / 删除
+$('btn-bg-import').addEventListener('click', () => $('bg-file-input').click());
+$('bg-file-input').addEventListener('change', (e) => {
+  importBgFiles(e.target.files);
+  e.target.value = '';
+});
 $('btn-back').addEventListener('click', () => {
   resetWorkspace();
   toast('已返回，可重新选择照片');
@@ -1709,6 +2088,7 @@ updateSVBg();
 placeCursors();
 setStage('empty');
 loadHistory();
+loadBackgrounds();
 </script>
 </body>
 </html>

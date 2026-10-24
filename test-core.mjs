@@ -315,5 +315,130 @@ console.log('\n=== 5. 历史记录 ===');
   assert(/ctx\.scale\(-1, 1\)/.test(html), '拍照时同样翻转，预览与成片方向一致');
 }
 
+/* ─────────────────────────────────────────────────
+   6. JPEG DPI 写入
+   ───────────────────────────────────────────────── */
+console.log('\n=== 6. JPEG DPI 写入 ===');
+
+function withJpegDpiBytes(input, dpi = 300) {
+  const buf = new Uint8Array(input);
+  if (buf.length < 4 || buf[0] !== 0xFF || buf[1] !== 0xD8) return buf;
+  let i = 2;
+  while (i + 16 <= buf.length) {
+    if (buf[i] !== 0xFF) break;
+    const marker = buf[i + 1];
+    if (marker === 0xD8 || marker === 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+    if (marker === 0xDA) break;
+    const len = (buf[i + 2] << 8) | buf[i + 3];
+    if (len < 2) break;
+    if (marker === 0xE0 && buf[i+4] === 0x4A && buf[i+5] === 0x46 && buf[i+6] === 0x49 && buf[i+7] === 0x46) {
+      buf[i+11] = 1;
+      buf[i+12] = (dpi >> 8) & 0xFF; buf[i+13] = dpi & 0xFF;
+      buf[i+14] = (dpi >> 8) & 0xFF; buf[i+15] = dpi & 0xFF;
+      return buf;
+    }
+    i += 2 + len;
+  }
+  const app0 = new Uint8Array([0xFF,0xE0,0x00,0x10,0x4A,0x46,0x49,0x46,0x00,0x01,0x01,0x01,
+    (dpi>>8)&0xFF, dpi&0xFF, (dpi>>8)&0xFF, dpi&0xFF, 0x00,0x00]);
+  const out = new Uint8Array(buf.length + app0.length);
+  out.set(buf.subarray(0,2), 0);
+  out.set(app0, 2);
+  out.set(buf.subarray(2), 2 + app0.length);
+  return out;
+}
+{
+  // 典型 JFIF 头（units=0, density=1,1 → PIL 读作 None）
+  const jfif = [0xFF,0xD8,0xFF,0xE0,0x00,0x10,0x4A,0x46,0x49,0x46,0x00,
+                0x01,0x01,0x00,0x00,0x01,0x00,0x01,0x00,0x00, 0xFF,0xDB,0x00];
+  const before = Uint8Array.from(jfif);
+  const after = withJpegDpiBytes(before, 300);
+
+  assert(after[13] === 1, 'units 被设为 1（英寸）');
+  const xd = (after[14] << 8) | after[15];
+  const yd = (after[16] << 8) | after[17];
+  assert(xd === 300 && yd === 300, `X/Y 密度写入 300（实际 ${xd}/${yd}）`);
+  assert(after.length === before.length, '就地改写不改变文件体积');
+
+  // 一寸 295×413 @300dpi 应换算成 25.0 × 35.0 mm
+  const wmm = 295 / xd * 25.4, hmm = 413 / yd * 25.4;
+  assert(Math.abs(wmm - 25.0) < 0.2 && Math.abs(hmm - 35.0) < 0.2,
+    `一寸换算为 25.0×35.0mm（实际 ${wmm.toFixed(1)}×${hmm.toFixed(1)}）`);
+
+  // 二寸 413×579 @300dpi → 35.0 × 49.0 mm
+  const wmm2 = 413 / xd * 25.4, hmm2 = 579 / yd * 25.4;
+  assert(Math.abs(wmm2 - 35.0) < 0.2 && Math.abs(hmm2 - 49.0) < 0.2,
+    `二寸换算为 35.0×49.0mm（实际 ${wmm2.toFixed(1)}×${hmm2.toFixed(1)}）`);
+}
+{
+  // 无 JFIF 段（只有 SOI + DQT）→ 应插入 APP0
+  const noJfif = [0xFF,0xD8,0xFF,0xDB,0x00,0x43,0x00,0x02,0x01];
+  const out = withJpegDpiBytes(Uint8Array.from(noJfif), 300);
+  assert(out.length === noJfif.length + 18, '无 JFIF 段时插入 18 字节 APP0');
+  assert(out[0] === 0xFF && out[1] === 0xD8, 'SOI 仍保持在文件开头');
+  assert(out[2] === 0xFF && out[3] === 0xE0, 'APP0 marker 紧跟在 SOI 之后');
+  assert(out[6] === 0x4A && out[7] === 0x46, 'APP0 内标识为 JFIF');
+  assert(out[13] === 1, '插入段 units = 1（英寸）');
+  assert(((out[14] << 8) | out[15]) === 300, '插入段 X 密度为 300');
+  assert(((out[16] << 8) | out[17]) === 300, '插入段 Y 密度为 300');
+}
+{
+  assert(/async function withJpegDpi/.test(html), '已实现 withJpegDpi');
+  assert(/await withJpegDpi\(raw, 300\)/.test(html), '下载当前成品时写入 300dpi');
+  assert(/withJpegDpi\(dataUrlToBlob\(item\.dataUrl\), 300\)/.test(html),
+    '历史记录下载时同样写入 300dpi');
+}
+
+/* ─────────────────────────────────────────────────
+   7. 背景仓库（最多 20 张 / 背景在下 / 人像置顶）
+   ───────────────────────────────────────────────── */
+console.log('\n=== 7. 背景仓库 ===');
+{
+  const BG_MAX = 20;
+  let bgs = [];
+  const add = (id) => {
+    bgs.unshift({ id });
+    if (bgs.length > BG_MAX) bgs = bgs.slice(0, BG_MAX);
+  };
+  for (let i = 1; i <= 25; i++) add(i);
+  assert(bgs.length === BG_MAX, `导入 25 张后上限仍为 20（实际 ${bgs.length}）`);
+  assert(bgs[0].id === 25, '最新导入的排在最前');
+  assert(!bgs.some((b) => b.id <= 5), '最旧 5 张被丢弃');
+
+  const del = (id) => { bgs = bgs.filter((b) => b.id !== id); };
+  del(15);
+  assert(bgs.length === 19 && !bgs.some((b) => b.id === 15), '删除中间一张生效');
+}
+{
+  // cover 铺满数学：背景图必须盖满输出画布，多余部分居中裁掉
+  const cover = (iw, ih, w, h) => {
+    const s = Math.max(w / iw, h / ih);
+    return { dw: iw * s, dh: ih * s, dx: (w - iw * s) / 2, dy: (h - ih * s) / 2 };
+  };
+  const r1 = cover(1000, 500, 295, 413);   // 横图 → 竖版输出
+  assert(r1.dw >= 295 - 0.01 && r1.dh >= 413 - 0.01, '横图铺满竖版：宽高均覆盖');
+  assert(r1.dx < 0 && Math.abs(r1.dy) < 0.01, '横图左右溢出居中、上下贴合');
+
+  const r2 = cover(500, 1000, 295, 413);   // 竖图 → 竖版输出
+  assert(r2.dw >= 295 - 0.01 && r2.dh >= 413 - 0.01, '竖图同样铺满');
+  assert(Math.abs(r2.dx) < 0.01, '竖图水平方向不裁切');
+}
+{
+  assert(/const BG_MAX = 20/.test(html), '背景仓库上限 20 张');
+  assert(/idphoto_bg_library_v1/.test(html), '背景库存入 localStorage（刷新保留）');
+  assert(/backgrounds\.unshift\(/.test(html), '新导入的背景插到最前');
+  assert(/backgrounds = backgrounds\.slice\(0, BG_MAX\)/.test(html), '超出上限丢弃最旧');
+  assert(/const bgImg = selectedBgId \? bgCache\.get\(selectedBgId\) : null/.test(html),
+    '合成时优先使用背景图');
+  assert(/drawCover\(ctx, bgImg, outW, outH\)/.test(html), '背景图按 cover 铺满输出');
+  assert(/ctx\.drawImage\(fg, 0, 0\);\s+\/\/ 人像永远叠在最上层/.test(html),
+    '人像始终绘制在背景之上');
+  assert(/classList\.toggle\('locked', locked\)/.test(html),
+    '使用背景图时锁定颜色调节');
+  assert(/function deleteBackground/.test(html) && /del\.className = 'del'/.test(html),
+    '背景图支持删除');
+  assert(/id="panel-bg-lib"/.test(html), '左栏存在「背景仓库」面板');
+}
+
 console.log(`\n───────────\n结果：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail === 0 ? 0 : 1);

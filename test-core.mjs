@@ -184,6 +184,36 @@ console.log('\n=== 2.5 掩膜方向校验 ===');
   }
   assert(allOk, '4 组真实掩膜实测值全部判定正确（区分人像与背景）');
 }
+{
+  // 方向自检：拿到背景掩膜时自动取反
+  const autoFix = (data, w, h) => {
+    let stats = centerEdgeStats(data, w, h);
+    if (stats.ratio < 0.85) {
+      const inv = data.map((v) => 1 - v);
+      stats = centerEdgeStats(inv, w, h);
+      return { data: inv, stats, flipped: true };
+    }
+    return { data, stats, flipped: false };
+  };
+  // 四周框 = 背景掩膜
+  const bgMask = makeMask(100, 100, (u, v) => !(u > 0.25 && u < 0.75 && v > 0.25 && v < 0.75));
+  const r1 = autoFix(bgMask, 100, 100);
+  assert(r1.flipped === true, '检测到背景掩膜自动取反');
+  assert(r1.stats.ratio > 0.85, `取反后方向变正常（ratio ${r1.stats.ratio.toFixed(2)}）`);
+
+  // 中央椭圆 = 正常人像掩膜，不应被改动
+  const personMask = makeMask(100, 100, (u, v) => {
+    const du = (u - 0.5) / 0.22, dv = (v - 0.5) / 0.35;
+    return du * du + dv * dv <= 1;
+  });
+  const r2 = autoFix(personMask, 100, 100);
+  assert(r2.flipped === false, '正常人像掩膜不被误反转');
+}
+{
+  assert(/let stats = centerEdgeStats\(data, mw, mh\)/.test(html), '源码包含掩膜方向自检');
+  assert(/if \(stats\.ratio < 0\.85\)/.test(html), '方向异常时自动取反');
+  assert(/这条记录由旧版本保存/.test(html), '旧版本记录给出明确提示而非硬载入');
+}
 
 /* ─────────────────────────────────────────────────
    3. 合成数学：不同背景色下人像是否保留
@@ -302,13 +332,20 @@ console.log('\n=== 5. 历史记录 ===');
   assert(/localStorage\.setItem\(HISTORY_KEY/.test(html), '历史记录写入 localStorage（刷新后保留）');
   assert(/history\.length > HISTORY_MAX\) history = history\.slice\(0, HISTORY_MAX\)/.test(html),
     '超出上限时丢弃最旧记录');
-  assert(/history = history\.filter\(\(h\) => h\.id !== viewingHistoryId\)/.test(html),
-    '支持删除单条历史');
+  assert(/function deleteHistoryById/.test(html), '支持删除单条历史');
   assert(/id="btn-continue"/.test(html) && !/btn-export/.test(html), '底部按钮已改为「继续」');
   assert(/id="btn-save-history"/.test(html) && /id="btn-download"/.test(html),
     '「继续」弹层含下载与保存历史两个入口');
-  assert(/id="btn-history-download"/.test(html) && /id="btn-history-delete"/.test(html),
-    '历史记录支持导出与删除');
+  assert(/async function editHistoryItem/.test(html), '点击历史图可载入主舞台二次编辑');
+  assert(/d\.addEventListener\('click', \(\) => editHistoryItem\(item\.id\)\)/.test(html),
+    '历史缩略图点击绑定的是编辑');
+  assert(/srcDataUrl = canvasToDataUrl\(state\.sourceCanvas, 720, 0\.72\)/.test(html),
+    '历史记录保存可编辑的原始素材快照');
+  assert(/snapshot: \{/.test(html) && /bgId: selectedBgId/.test(html),
+    '历史记录保存尺寸/颜色/滤镜/背景参数');
+  assert(/className = 'dl'/.test(html) && /className = 'del'/.test(html),
+    '缩略图上提供导出与删除按钮');
+  assert(!/history-modal/.test(html), '旧的历史弹层已移除');
   assert(!/feat-dress/.test(html), '左侧「换装」项已删除');
   assert(/#camera-video[\s\S]{0,600}transform: scaleX\(-1\)/.test(html),
     '摄像头预览已水平翻转（修正左右颠倒）');

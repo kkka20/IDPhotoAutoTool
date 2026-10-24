@@ -369,8 +369,6 @@
     box-shadow: 0 5px 18px rgba(15,25,45,.18); display: block;
   }
   .modal-card .btn { width: 100%; margin-bottom: 8px; justify-content: center; }
-  .btn.danger { background: #fdecec; color: #c0392b; }
-  .btn.danger:hover { background: #fbdada; }
 
   /* ═══ 背景仓库 ═══ */
   .bg-import {
@@ -438,6 +436,19 @@
     font-size: 8px; padding: 2px 3px; text-align: center;
     font-variant-numeric: tabular-nums;
   }
+  /* 缩略图上的小操作按钮：↓ 导出、× 删除 */
+  .history-item .del,
+  .history-item .dl {
+    position: absolute; top: 2px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: rgba(8,12,20,.7); color: #fff;
+    font-size: 10px; line-height: 14px; text-align: center;
+    cursor: pointer; opacity: 0; transition: opacity .15s;
+  }
+  .history-item .del { right: 2px; }
+  .history-item .dl { right: 19px; }
+  .history-item:hover .del,
+  .history-item:hover .dl { opacity: 1; }
   .history-empty {
     font-size: 10.5px; color: var(--muted); text-align: center;
     padding: 14px 6px; line-height: 1.6;
@@ -693,18 +704,6 @@
     <button class="btn primary" id="btn-download">下载图片</button>
     <button class="btn ghost" id="btn-save-history">保存到历史记录</button>
     <button class="btn ghost" id="btn-finish-back">返回</button>
-  </div>
-</div>
-
-<!-- 历史记录查看弹层 -->
-<div class="modal hidden" id="history-modal">
-  <div class="modal-card">
-    <h3 id="history-title">历史记录</h3>
-    <p id="history-meta"></p>
-    <div class="modal-preview"><img id="history-big" alt="历史记录" /></div>
-    <button class="btn primary" id="btn-history-download">导出</button>
-    <button class="btn danger" id="btn-history-delete">删除</button>
-    <button class="btn ghost" id="btn-history-close">关闭</button>
   </div>
 </div>
 
@@ -1035,6 +1034,16 @@ function extractPersonMask(segResult) {
     if (sum / data.length > 0.6) data = data.map((v) => 1 - v);
   }
 
+  /* 方向自检：证件照的人像一定集中在中部。
+     若前景集中在四周（中心/边缘比 < 0.85），说明拿到的是背景掩膜，
+     直接取反，避免出现"人像被挖空、四周被保留"的错误结果。
+     实测人像掩膜 3.26 / 2.92，背景掩膜 0.02 / 0.70，区分度足够。 */
+  let stats = centerEdgeStats(data, mw, mh);
+  if (stats.ratio < 0.85) {
+    data = data.map((v) => 1 - v);
+    stats = centerEdgeStats(data, mw, mh);
+  }
+
   const c = makeCanvas(mw, mh);
   const ctx = c.getContext('2d');
   const img = ctx.createImageData(mw, mh);
@@ -1048,7 +1057,7 @@ function extractPersonMask(segResult) {
   }
   ctx.putImageData(img, 0, 0);
 
-  return { canvas: c, width: mw, height: mh, stats: centerEdgeStats(data, mw, mh) };
+  return { canvas: c, width: mw, height: mh, stats };
 }
 
 /** 掩膜在「中央」与「边缘」的覆盖率之比，用于识别是否取到背景掩膜 */
@@ -1607,7 +1616,6 @@ function drawCover(ctx, img, w, h) {
 const HISTORY_KEY = 'idphoto_history_v1';
 const HISTORY_MAX = 10;
 let history = [];
-let viewingHistoryId = null;
 
 function loadHistory() {
   try {
@@ -1638,7 +1646,7 @@ function renderHistory() {
   history.forEach((item) => {
     const d = document.createElement('div');
     d.className = 'history-item';
-    d.title = '点击可导出或删除';
+    d.title = '点击载入主舞台，继续编辑';
 
     const img = document.createElement('img');
     img.src = item.dataUrl;
@@ -1648,9 +1656,31 @@ function renderHistory() {
     ts.className = 'ts';
     ts.textContent = item.time;
 
+    // 右上角：导出
+    const dl = document.createElement('div');
+    dl.className = 'dl';
+    dl.textContent = '↓';
+    dl.title = '导出这张';
+    dl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadHistoryById(item.id);
+    });
+
+    // 右上角偏左：删除
+    const del = document.createElement('div');
+    del.className = 'del';
+    del.textContent = '×';
+    del.title = '删除这张';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteHistoryById(item.id);
+    });
+
     d.appendChild(img);
     d.appendChild(ts);
-    d.addEventListener('click', () => openHistoryView(item.id));
+    d.appendChild(dl);
+    d.appendChild(del);
+    d.addEventListener('click', () => editHistoryItem(item.id));
     grid.appendChild(d);
   });
 }
@@ -1666,11 +1696,15 @@ function saveCurrentToHistory() {
   const bad = checks.find((c) => c.type === 'bad');
   if (bad) { setChecks(checks); toast('人像校验未通过，无法保存', true); return; }
 
-  // 质量 0.82：单张约 20~30KB，10 张不会撑爆 localStorage
+  // 成品：质量 0.82，单张约 20~30KB
   const dataUrl = result.canvas.toDataURL('image/jpeg', 0.82);
+  // 可编辑快照：压缩到 720px，供二次编辑时重新抠图与调色
+  const srcDataUrl = canvasToDataUrl(state.sourceCanvas, 720, 0.72);
+
   const item = {
     id: Date.now() + '_' + Math.random().toString(36).slice(2, 7),
     dataUrl,
+    srcDataUrl,
     size: state.feat.resize ? SIZE_PRESETS[state.size].name : 'custom',
     color: state.colorName || 'custom',
     w: result.canvas.width,
@@ -1679,6 +1713,15 @@ function saveCurrentToHistory() {
       month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     }),
+    // 记录参数，二次编辑时原样还原
+    snapshot: {
+      size: state.size,
+      feat: { ...state.feat },
+      color: { ...state.color },
+      colorName: state.colorName,
+      filter: { ...state.filter },
+      bgId: selectedBgId,
+    },
   };
 
   history.unshift(item);
@@ -1695,23 +1738,94 @@ function saveCurrentToHistory() {
   toast('已保存到历史记录');
 }
 
-function openHistoryView(id) {
+/** 把 canvas 等比压缩后转 dataURL */
+function canvasToDataUrl(canvas, maxSide, quality) {
+  const s = Math.min(1, maxSide / Math.max(canvas.width, canvas.height));
+  const c = makeCanvas(Math.round(canvas.width * s), Math.round(canvas.height * s));
+  c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', quality);
+}
+
+function loadImageFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('图片解码失败'));
+    img.src = url;
+  });
+}
+
+/** 点击历史图：载入主舞台，恢复当时的参数，进入二次编辑 */
+async function editHistoryItem(id) {
   const item = history.find((h) => h.id === id);
   if (!item) return;
-  viewingHistoryId = id;
-  $('history-big').src = item.dataUrl;
-  $('history-title').textContent = `历史记录 · ${item.size}`;
-  $('history-meta').textContent = `${item.color} · ${item.w}×${item.h} · ${item.time}`;
-  $('history-modal').classList.remove('hidden');
+
+  /* 旧版本记录只存了成品、没有原始素材。
+     拿成品去二次抠图会把"人像+底色"的合成图当成原图，
+     分割方向极易反转（人像被挖空、四周被保留），所以不再硬载入。 */
+  if (!item.srcDataUrl) {
+    toast('这条记录由旧版本保存，缺少原始素材、无法二次编辑。删除后重新制作一张即可编辑。', true);
+    return;
+  }
+
+  try {
+    const img = await loadImageFromUrl(item.srcDataUrl);
+    const snap = item.snapshot || {};
+
+    // ── 还原尺寸 ──
+    if (snap.size && SIZE_PRESETS[snap.size]) {
+      state.size = snap.size;
+      document.querySelectorAll('.size-item').forEach((o) =>
+        o.classList.toggle('on', o.dataset.size === snap.size));
+    }
+
+    // ── 还原功能勾选 ──
+    if (snap.feat) {
+      state.feat = { ...state.feat, ...snap.feat };
+      $('feat-matting').checked = state.feat.matting;
+      $('feat-bg').checked = state.feat.background;
+      $('feat-resize').checked = state.feat.resize;
+      $('feat-filter').checked = state.feat.filter;
+      syncFeatStyles();
+    }
+
+    // ── 还原滤镜参数 ──
+    if (snap.filter) {
+      state.filter = { ...state.filter, ...snap.filter };
+      $('f-bright').value = state.filter.brightness;
+      $('f-bright-v').textContent = state.filter.brightness + '%';
+      $('f-contrast').value = state.filter.contrast;
+      $('f-contrast-v').textContent = state.filter.contrast + '%';
+      $('f-smooth').value = state.filter.smooth;
+      $('f-smooth-v').textContent = state.filter.smooth + '%';
+    }
+
+    // ── 还原背景：背景图优先，否则还原颜色 ──
+    const bgItem = snap.bgId ? backgrounds.find((b) => b.id === snap.bgId) : null;
+    if (bgItem) {
+      await getBgImage(bgItem);      // 预解码，保证合成时能同步取到
+      selectedBgId = bgItem.id;
+    } else {
+      selectedBgId = null;
+      if (snap.color) setColor(snap.color, true);
+    }
+    syncBgMode();
+    renderBgGrid();
+
+    // ── 载入素材并重新抠图 ──
+    const c = makeCanvas(img.naturalWidth, img.naturalHeight);
+    c.getContext('2d').drawImage(img, 0, 0);
+    await adoptSource(c, `历史 · ${item.time}`);
+
+    toast('已载入历史记录，可继续编辑');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) {
+    toast('载入失败：' + (err?.message || err), true);
+  }
 }
 
-function closeHistoryView() {
-  $('history-modal').classList.add('hidden');
-  viewingHistoryId = null;
-}
-
-async function downloadHistoryItem() {
-  const item = history.find((h) => h.id === viewingHistoryId);
+async function downloadHistoryById(id) {
+  const item = history.find((h) => h.id === id);
   if (!item) return;
   try {
     const blob = await withJpegDpi(dataUrlToBlob(item.dataUrl), 300);
@@ -1723,13 +1837,12 @@ async function downloadHistoryItem() {
   }
 }
 
-function deleteHistoryItem() {
+function deleteHistoryById(id) {
   const before = history.length;
-  history = history.filter((h) => h.id !== viewingHistoryId);
+  history = history.filter((h) => h.id !== id);
   if (history.length === before) return;
   persistHistory();
   renderHistory();
-  closeHistoryView();
   toast('已删除');
 }
 
@@ -2053,23 +2166,16 @@ $('btn-continue').addEventListener('click', openFinish);
 $('btn-download').addEventListener('click', downloadCurrent);
 $('btn-save-history').addEventListener('click', saveCurrentToHistory);
 $('btn-finish-back').addEventListener('click', closeFinish);
-$('btn-history-download').addEventListener('click', downloadHistoryItem);
-$('btn-history-delete').addEventListener('click', deleteHistoryItem);
-$('btn-history-close').addEventListener('click', closeHistoryView);
 
 // 点弹层空白处关闭
 $('finish-modal').addEventListener('click', (e) => {
   if (e.target === $('finish-modal')) closeFinish();
 });
-$('history-modal').addEventListener('click', (e) => {
-  if (e.target === $('history-modal')) closeHistoryView();
-});
 
 // Esc 关闭弹层
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!$('history-modal').classList.contains('hidden')) closeHistoryView();
-  else if (!$('finish-modal').classList.contains('hidden')) closeFinish();
+  if (!$('finish-modal').classList.contains('hidden')) closeFinish();
 });
 
 // 尺寸变化时重算预览缩放

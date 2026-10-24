@@ -467,7 +467,8 @@ console.log('\n=== 7. 背景仓库 ===');
   assert(/backgrounds = backgrounds\.slice\(0, BG_MAX\)/.test(html), '超出上限丢弃最旧');
   assert(/const bgImg = selectedBgId \? bgCache\.get\(selectedBgId\) : null/.test(html),
     '合成时优先使用背景图');
-  assert(/drawCover\(ctx, bgImg, outW, outH\)/.test(html), '背景图按 cover 铺满输出');
+  assert(/drawCover\(ctx, bgImg, outW, outH, state\.bgOffsetX\)/.test(html),
+    '背景图按 cover 铺满输出');
   assert(/ctx\.drawImage\(fg, 0, 0\);\s+\/\/ 人像永远叠在最上层/.test(html),
     '人像始终绘制在背景之上');
   assert(/classList\.toggle\('locked', locked\)/.test(html),
@@ -475,6 +476,174 @@ console.log('\n=== 7. 背景仓库 ===');
   assert(/function deleteBackground/.test(html) && /del\.className = 'del'/.test(html),
     '背景图支持删除');
   assert(/id="panel-bg-lib"/.test(html), '左栏存在「背景仓库」面板');
+}
+
+/* ─────────────────────────────────────────────────
+   8. 边缘硬化（可开关）
+   ───────────────────────────────────────────────── */
+console.log('\n=== 8. 边缘硬化 ===');
+{
+  const HARDEN_LO = 0.35, HARDEN_HI = 0.65;
+  const harden = (v) => {
+    const r = (v - HARDEN_LO) / (HARDEN_HI - HARDEN_LO);
+    return r <= 0 ? 0 : (r >= 1 ? 1 : r);
+  };
+  assert(harden(0) === 0, 'α=0 保持 0');
+  assert(harden(0.3) === 0, 'α=0.3 被压到 0（原背景残留）');
+  assert(Math.abs(harden(0.5) - 0.5) < 1e-6, 'α=0.5 落在中点，保持 0.5');
+  assert(harden(0.7) === 1, 'α=0.7 被拉到 1（实体边缘）');
+  assert(harden(1) === 1, 'α=1 保持 1');
+
+  // 过渡带宽度对比：原 0~1 全程 1.0，硬化后只有 0.35~0.65 这 0.30 区间仍过渡
+  assert((HARDEN_HI - HARDEN_LO) < 0.4, '过渡带压窄到 0.30 以内');
+}
+{
+  assert(/const EDGE_HARDEN = new URLSearchParams/.test(html), '硬化可通过 ?edge=off 关闭');
+  assert(/function hardenCanvasAlpha/.test(html), '已实现硬核化函数');
+  assert(/const HARDEN_LO = 0\.35/.test(html) && /const HARDEN_HI = 0\.65/.test(html),
+    '硬化阈值 0.35 / 0.65');
+  assert(/if \(EDGE_HARDEN\) hardenCanvasAlpha\(scaled, HARDEN_LO, HARDEN_HI\)/.test(html),
+    '合成时对缩放后的掩膜做硬化');
+  assert(/sctx\.filter = 'blur\(0\.6px\)'/.test(html), '硬化后做 0.6px 轻羽化，避免锯齿');
+}
+
+/* ─────────────────────────────────────────────────
+   9. 自定义尺寸 + 背景图拖拽
+   ───────────────────────────────────────────────── */
+console.log('\n=== 9. 自定义尺寸与背景拖拽 ===');
+{
+  // 自定义尺寸取值
+  const custom = (w, h) => ({ w, h, name: '自定义' });
+  const sizeOf = (s) => (s.size === 'custom'
+    ? custom(s.customW, s.customH)
+    : { '1inch': { w: 295, h: 413, name: '一寸' },
+        '2inch': { w: 413, h: 579, name: '二寸' } }[s.size]);
+
+  assert(sizeOf({ size: '1inch' }).w === 295, '一寸 = 295×413');
+  assert(sizeOf({ size: '2inch' }).h === 579, '二寸 = 413×579');
+  assert(sizeOf({ size: 'custom', customW: 500, customH: 700 }).w === 500, '自定义尺寸生效');
+  assert(sizeOf({ size: 'custom', customW: 500, customH: 700 }).name === '自定义', '自定义名称正确');
+
+  // 输入值夹紧
+  const clampInt = (v, min, max, fb) => {
+    if (v === '' || v === null || v === undefined) return fb;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fb;
+    return Math.max(min, Math.min(max, Math.round(n)));
+  };
+  assert(clampInt(500, 100, 2000, 400) === 500, '合法值原样通过');
+  assert(clampInt(50, 100, 2000, 400) === 100, '过小值夹到 100');
+  assert(clampInt(5000, 100, 2000, 400) === 2000, '过大值夹到 2000');
+  assert(clampInt('', 100, 2000, 400) === 400, '空值回退到兜底');
+  assert(clampInt('abc', 100, 2000, 400) === 400, '非法值回退到兜底');
+}
+{
+  // 背景图水平偏移：任何 offset 都必须盖满画布
+  const cover = (iw, ih, w, h, offsetX) => {
+    const s = Math.max(w / iw, h / ih);
+    const dw = iw * s, dh = ih * s;
+    const extra = Math.max(0, dw - w);
+    const off = Math.max(-1, Math.min(1, offsetX));
+    const dx = -extra / 2 + (extra / 2) * off;
+    return { dx, dw, dh, extra };
+  };
+  const W = 295, H = 413;
+
+  // 超宽图：横向有余量
+  const wide = cover(1200, 400, W, H, 0);
+  assert(wide.extra > 0, '超宽图存在可移动余量');
+  for (const off of [-1, -0.5, 0, 0.5, 1]) {
+    const r = cover(1200, 400, W, H, off);
+    const covers = r.dx <= 0.01 && r.dx + r.dw >= W - 0.01;
+    if (!covers) { assert(false, `offset=${off} 时未盖满画布`); }
+  }
+  assert(true, 'offset ∈ [-1,1] 全程盖满画布');
+
+  const left = cover(1200, 400, W, H, -1);
+  const right = cover(1200, 400, W, H, 1);
+  const mid = cover(1200, 400, W, H, 0);
+  assert(Math.abs(left.dx - (-left.extra)) < 0.01, 'offset=-1 贴最左');
+  assert(Math.abs(right.dx) < 0.01, 'offset=1 贴最右');
+  assert(Math.abs(mid.dx - (-mid.extra / 2)) < 0.01, 'offset=0 居中');
+
+  // 竖向图：横向没有余量，拖拽不应破坏覆盖
+  const tall = cover(400, 1200, W, H, 1);
+  assert(tall.extra === 0, '竖向图横向无余量');
+  assert(Math.abs(tall.dx) < 0.01, '无余量时 dx=0，不产生空隙');
+}
+{
+  assert(/function getSizePreset/.test(html), '已实现 getSizePreset（支持自定义）');
+  assert(/id="custom-size-row"/.test(html) && /id="custom-w"/.test(html) && /id="custom-h"/.test(html),
+    '自定义宽高输入框存在');
+  assert(/data-size="custom"/.test(html), '尺寸列表含「自定义」项');
+  assert(/state\.size === 'custom'/.test(html), '自定义尺寸参与合成');
+  assert(/drawCover\(ctx, bgImg, outW, outH, state\.bgOffsetX\)/.test(html),
+    '合成时应用背景水平偏移');
+  assert(/const dx = -extra \/ 2 \+ \(extra \/ 2\) \* off/.test(html), '偏移映射公式正确');
+  assert(/addEventListener\('pointerdown'/.test(html) && /addEventListener\('pointermove'/.test(html),
+    '画布支持指针拖拽');
+  assert(/state\.bgOffsetX = Math\.max\(-1, Math\.min\(1, bgDrag\.startOffset \+ delta\)\)/.test(html),
+    '拖拽结果夹在 [-1, 1]');
+  assert(/state\.bgOffsetX: /.test(html) || /bgOffsetX: state\.bgOffsetX/.test(html),
+    '历史快照记录背景偏移');
+  assert(/customW: state\.customW/.test(html), '历史快照记录自定义尺寸');
+}
+
+{
+  // 自定义取景范围：只对 custom 生效，且放大后被原图边界约束
+  const HEAD_RATIO = 0.65;
+  const cropH = (headHeight, zoom, isCustom) =>
+    (headHeight / HEAD_RATIO) * (isCustom ? zoom : 1);
+
+  const base = cropH(400, 1, true);
+  assert(Math.abs(base - 400 / 0.65) < 0.01, 'zoom=1 时等于标准构图');
+
+  const zoomed = cropH(400, 2, true);
+  assert(Math.abs(zoomed - base * 2) < 0.01, '自定义 zoom=2 裁剪框翻倍');
+
+  const onInch = cropH(400, 2, false);
+  assert(Math.abs(onInch - base) < 0.01, '一寸模式不受 zoom 影响（zoom 被忽略）');
+  const on2Inch = cropH(400, 2, false);
+  assert(Math.abs(on2Inch - base) < 0.01, '二寸模式同样不受影响');
+
+  // 放大后仍要经过 fit 约束，不会越界
+  const fitCrop = (ch, W, H) => {
+    const fit = Math.min(1, W / (ch * (295 / 413)), H / ch);
+    return { ch: ch * fit, fit };
+  };
+  const r = fitCrop(cropH(600, 2.6, true), 1280, 720);
+  assert(r.ch <= 720 + 0.01, `超界时被压缩到原图高度内（${r.ch.toFixed(0)} ≤ 720）`);
+  assert(r.fit < 1, '确实触发了压缩');
+}
+{
+  assert(/if \(state\.size === 'custom'\) cropH \*= state\.cropZoom/.test(html),
+    '取景范围只在自定义模式生效');
+  assert(/id="custom-zoom"/.test(html) && /id="custom-zoom-row"/.test(html),
+    '存在取景范围滑块');
+  assert(/min="100" max="260"/.test(html), '范围 1.00× ~ 2.60×');
+  assert(/cropZoom: state\.cropZoom/.test(html), '历史快照记录取景范围');
+  assert(/id="custom-tip"/.test(html), '有取景范围说明文字');
+}
+
+{
+  // 输出尺寸比例化简
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const ratio = (w, h) => {
+    const d = gcd(w, h) || 1;
+    return `${w / d}:${h / d}`;
+  };
+  assert(ratio(400, 560) === '5:7', '400×560 → 5:7（与一寸同比例）');
+  assert(ratio(295, 413) === '5:7', '一寸 295×413 = 5:7（公约数 59）');
+  assert(ratio(400, 400) === '1:1', '400×400 → 1:1');
+  assert(ratio(300, 400) === '3:4', '300×400 → 3:4');
+  assert(ratio(600, 840) === '5:7', '600×840 同样是 5:7（放大不改变比例）');
+}
+{
+  assert(/id="custom-ratio"/.test(html), '界面显示当前输出比例');
+  assert(/function gcd/.test(html), '实现了比例化简');
+  assert(/改比例才会改变构图/.test(html), '明确提示数值与构图的关系');
+  assert(!/::-webkit-inner-spin-button[\s\S]{0,120}-webkit-appearance: none/.test(html),
+    '数字输入框保留原生上下箭头（可点击微调）');
 }
 
 console.log(`\n───────────\n结果：${pass} 通过 / ${fail} 失败\n`);

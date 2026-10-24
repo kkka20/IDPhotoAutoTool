@@ -2,6 +2,50 @@
 
 输入人像照片，自动识别人脸区域，按照标准证件照比例裁切，支持一键替换红 / 蓝 / 白色背景，输出合规证件照。
 
+**两种实现，共用同一套构图参数：**
+
+| 实现 | 文件 | 技术栈 | 特点 |
+|---|---|---|---|
+| 网页版 | `index.html` | MediaPipe + Canvas | 单文件、无需安装、照片不上传服务器 |
+| 桌面版 | `main.py` | OpenCV + U2Net | 可批量、可接摄像头、边缘精修更完整 |
+
+## 效果展示
+
+### 网页版
+
+| 一寸红底（标准构图） | 自定义尺寸 + 背景图 |
+| :---: | :---: |
+| ![一寸红底](docs/screenshots/web-1inch-red.png) | ![自定义尺寸与背景图](docs/screenshots/web-custom-bg.png) |
+
+左侧为尺寸与功能勾选，中间是人像预览，右侧是背景颜色、竖向调色板与历史记录。
+
+### 网页版功能一览
+
+- 拍照（带证件照取景框引导）/ 导入本地图片
+- AI 人像抠图（MediaPipe selfie_segmenter，软 Alpha）
+- 边缘硬化，减少换底色后的灰边与光晕
+- 纯色背景：白 / 红 / 蓝 + 任意 RGB（竖向色相条 + 饱和度明度方块）
+- 背景仓库：最多 20 张自定义背景图，人像置顶，可左右拖动调整取景
+- 尺寸：一寸 295×413 / 二寸 413×579 / 自定义宽高 + 取景范围 1.0~2.6×
+- 滤镜：亮度 / 对比度 / 磨皮
+- 历史记录：最多 10 条，点击可载入主舞台二次编辑
+- 导出 JPEG 并写入 300dpi，打印尺寸正确
+
+## 运行（网页版）
+
+```bash
+cd open_cv_zjz
+python3 -m http.server 8080
+# 浏览器打开 http://localhost:8080/index.html
+```
+
+> 必须通过 `localhost` 或 HTTPS 访问，否则浏览器不允许调用摄像头。
+> 想对比关闭边缘硬化的效果：`index.html?edge=off`
+
+## 桌面版详细说明
+
+输入人像照片，自动识别人脸区域，按照标准证件照比例裁切，支持一键替换红 / 蓝 / 白色背景，输出合规证件照。
+
 ## 功能列表
 
 - 本地图片加载 / 摄像头实时拍摄（镜像预览 + 构图框引导）
@@ -93,17 +137,17 @@ python3 main.py --debug                  # 导出中间掩膜到 output/debug/
 
 ```
 IDPhotoAutoTool/
-├── main.py              # 全部功能（单文件，~1000 行）
-├── requirements.txt     # 依赖清单
+├── index.html           # 纯前端网页版（单文件，MediaPipe + Canvas）
+├── main.py              # 桌面版（OpenCV + U2Net）
+├── test-core.mjs        # 网页版逻辑回归测试
+├── requirements.txt     # 桌面版依赖清单
 ├── README.md            # 本文件
+├── docs/
+│   └── screenshots/     # 效果截图
+│       ├── web-1inch-red.png
+│       └── web-custom-bg.png
 ├── assets/              # 输入图片（被 .gitignore 排除）
-│   ├── 1.png            # 默认测试图
-│   └── camera_shot.jpg  # 摄像头实拍原图
-├── output/              # 生成成品（被 .gitignore 排除）
-│   ├── 1inch_white.jpg
-│   ├── 1inch_red.jpg
-│   └── 1inch_blue.jpg
-└── .gitignore
+└── output/              # 生成成品（被 .gitignore 排除）
 ```
 
 ## 已知局限
@@ -112,9 +156,3 @@ IDPhotoAutoTool/
 - **U2Net 320×320 硬上限** — isnet-general-use 更高清但需从 GitHub 下载权重，当前网络受限
 - **证件照合规性** — 构图参数（头高占比 65%、发顶留白 5%）是经验值，部分场景可能需要微调
 - **美颜** — 无磨皮、亮度微调等美容功能（TODO）
-
-## 效果示例
-
-| 原图 | 白底 | 红底 | 蓝底 |
-| :---: | :---: | :---: | :---: |
-| *（待补截图）* | | | |

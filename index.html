@@ -91,6 +91,47 @@
   }
   .size-item.on .tick { opacity: 1; }
 
+  /* 自定义尺寸输入 */
+  .custom-size-row {
+    display: flex; align-items: center; gap: 6px; margin-top: 8px;
+    padding: 8px 9px; border-radius: 9px; background: #f5f8fd;
+    border: 1px solid #e0e8f5;
+  }
+  .custom-size-row input[type=number] {
+    width: 100%; min-width: 0; flex: 1;
+    padding: 6px 7px; border-radius: 6px; border: 1px solid var(--border);
+    background: #fff; font-size: 12px; font-family: inherit;
+    color: var(--text); outline: none; text-align: center;
+    -moz-appearance: textfield;
+  }
+  .custom-size-row input[type=number]:focus { border-color: var(--primary); }
+  .custom-size-row .x { font-size: 11px; color: var(--muted); flex: none; }
+  .custom-size-row .unit { font-size: 10px; color: var(--muted); flex: none; }
+  .custom-size-row .cl { font-size: 10.5px; color: #5a667d; flex: none; }
+  .custom-ratio-tip {
+    margin-top: 6px; font-size: 10px; color: var(--muted);
+    line-height: 1.5; padding-left: 2px;
+  }
+  .custom-ratio-tip b { color: #3a455c; font-weight: 650; }
+  .custom-ratio-tip b#custom-ratio { color: var(--primary); }
+
+  /* 自定义取景范围 */
+  .custom-zoom-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 7px;
+    padding: 8px 9px; border-radius: 9px; background: #f5f8fd;
+    border: 1px solid #e0e8f5;
+  }
+  .custom-zoom-row .zl { font-size: 10.5px; color: #5a667d; flex: none; }
+  .custom-zoom-row input[type=range] { flex: 1; min-width: 0; accent-color: var(--primary); height: 14px; }
+  .custom-zoom-row .zv {
+    font-size: 10.5px; color: var(--primary); font-weight: 650;
+    width: 38px; text-align: right; font-variant-numeric: tabular-nums; flex: none;
+  }
+  .custom-tip {
+    margin-top: 6px; font-size: 10px; color: var(--muted);
+    line-height: 1.45; padding-left: 2px;
+  }
+
   /* ── 功能勾选（左栏底部，紧凑） ── */
   .feat-list { display: flex; flex-direction: column; gap: 5px; }
   .feat {
@@ -529,7 +570,33 @@
           </div>
           <span class="tick">✓</span>
         </div>
+        <div class="size-item" data-size="custom">
+          <span class="ico">⚙️</span>
+          <div class="txt">
+            <div class="n">自定义</div>
+            <div class="s" id="custom-size-label">400 × 560 px</div>
+          </div>
+          <span class="tick">✓</span>
+        </div>
       </div>
+
+      <div class="custom-size-row hidden" id="custom-size-row">
+        <span class="cl">输出</span>
+        <input type="number" id="custom-w" min="100" max="2000" step="1" value="400" />
+        <span class="x">×</span>
+        <input type="number" id="custom-h" min="100" max="2000" step="1" value="560" />
+        <span class="unit">px</span>
+      </div>
+      <div class="custom-ratio-tip hidden" id="custom-ratio-tip">
+        当前比例 <b id="custom-ratio">5:7</b> —— 数值决定清晰度与文件大小，<b>改比例才会改变构图</b>（点框内 ▲▼ 可微调）
+      </div>
+
+      <div class="custom-zoom-row hidden" id="custom-zoom-row">
+        <span class="zl">取景范围</span>
+        <input type="range" id="custom-zoom" min="100" max="260" step="5" value="100" />
+        <span class="zv" id="custom-zoom-v">1.00×</span>
+      </div>
+      <div class="custom-tip hidden" id="custom-tip">调大取景范围，人像变小、背景露出更多</div>
     </section>
 
     <section class="panel">
@@ -732,6 +799,14 @@ const MIN_FG_RATIO = 0.02;
 const MAX_FG_RATIO = 0.985;
 const MIN_MASK_DIR = 0.85;
 
+/* 边缘硬化：把掩膜里 [LO, HI] 的中间值拉成 0/1，压窄半透明过渡带。
+   selfie_segmenter 输出 256×256，放大到 295×413 后边缘是 3~5px 的斜坡，
+   贴到蓝底上就是一圈灰边。
+   想对比原效果：地址栏加 ?edge=off（如 index.html?edge=off）。 */
+const EDGE_HARDEN = new URLSearchParams(location.search).get('edge') !== 'off';
+const HARDEN_LO = 0.35;
+const HARDEN_HI = 0.65;
+
 const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const WASM_URL   = `${CDN}/wasm`;
 const SEG_MODEL  = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
@@ -755,9 +830,13 @@ const state = {
 
   feat: { matting: true, background: true, resize: true, filter: false },
   size: '1inch',
+  customW: 400,
+  customH: 560,
+  cropZoom: 1,             // 自定义模式的取景范围倍数：1.0 标准，越大背景露出越多
   color: { ...COLOR_PRESETS.blue },
   colorName: 'blue',
   filter: { brightness: 104, contrast: 104, smooth: 35 },
+  bgOffsetX: 0,            // 背景图水平偏移：-1 最左，0 居中，1 最右
 
   exporting: false,
   stream: null,
@@ -817,6 +896,37 @@ function makeCanvas(w, h) {
   return c;
 }
 
+/** 当前尺寸预设：一寸 / 二寸 / 自定义 */
+function getSizePreset() {
+  if (state.size === 'custom') {
+    return {
+      w: state.customW,
+      h: state.customH,
+      name: '自定义',
+      spec: `${state.customW}×${state.customH}`,
+    };
+  }
+  return SIZE_PRESETS[state.size] || SIZE_PRESETS['1inch'];
+}
+
+/** 取整并夹在 [min, max] 内，非法值返回兜底 */
+function clampInt(v, min, max, fallback) {
+  // 注意 Number('') === 0，空输入必须单独拦掉，否则会被夹成最小值
+  if (v === '' || v === null || v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+
+function updateCustomLabel() {
+  $('custom-size-label').textContent = `${state.customW} × ${state.customH} px`;
+  const d = gcd(state.customW, state.customH) || 1;
+  const ratioEl = $('custom-ratio');
+  if (ratioEl) ratioEl.textContent = `${state.customW / d}:${state.customH / d}`;
+}
+
 /* ══════════════════════════════════════════════════
    舞台状态切换（拍照 / 预览 / 编辑 共用同一块区域）
    ══════════════════════════════════════════════════ */
@@ -830,7 +940,7 @@ function setStage(mode) {
   $('stage-title').textContent = titles[mode] || '';
 
   // 引导框比例跟随当前尺寸
-  const p = SIZE_PRESETS[state.size];
+  const p = getSizePreset();
   $('guide-frame').style.aspectRatio = `${p.w} / ${p.h}`;
 }
 
@@ -1110,9 +1220,8 @@ function computeCropBox() {
       w: fw, h: fw,
     };
   }
-  const aspect = state.feat.resize
-    ? SIZE_PRESETS[state.size].w / SIZE_PRESETS[state.size].h
-    : 0.714;
+  const preset = getSizePreset();
+  const aspect = state.feat.resize ? preset.w / preset.h : 0.714;
 
   let headTop = face.y - HEAD_TOP_ABOVE_FACE * face.h;
   const personTop = findPersonTop(face);
@@ -1122,6 +1231,8 @@ function computeCropBox() {
   const chin = face.y + face.h;
 
   let cropH = (chin - headTop) / HEAD_HEIGHT_RATIO;
+  // 仅自定义尺寸允许放大取景范围：框越大 → 人像在成品里越小 → 背景露出越多
+  if (state.size === 'custom') cropH *= state.cropZoom;
   let cropW = cropH * aspect;
 
   /* 把裁剪框约束在原图之内：越界会露出 canvas 底色，
@@ -1146,7 +1257,7 @@ function computeCropBox() {
    ══════════════════════════════════════════════════ */
 function outputSize() {
   if (state.feat.resize) {
-    const p = SIZE_PRESETS[state.size];
+    const p = getSizePreset();
     return { w: p.w, h: p.h };
   }
   const crop = computeCropBox();
@@ -1172,13 +1283,39 @@ function buildForeground(outW, outH, crop) {
       (crop.h / state.sourceH) * mh,
       0, 0, outW, outH
     );
+
+    // 边缘硬化：压窄 256×256 放大带来的半透明斜坡
+    if (EDGE_HARDEN) hardenCanvasAlpha(scaled, HARDEN_LO, HARDEN_HI);
+
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(scaled, 0, 0);
+    if (EDGE_HARDEN) {
+      // 硬化后边缘会发硬发锯齿，叠一层极轻的羽化（0.6px）找回自然感
+      const soft = makeCanvas(outW, outH);
+      const sctx = soft.getContext('2d');
+      sctx.filter = 'blur(0.6px)';
+      sctx.drawImage(scaled, 0, 0);
+      ctx.drawImage(soft, 0, 0);
+    } else {
+      ctx.drawImage(scaled, 0, 0);
+    }
     ctx.globalCompositeOperation = 'source-over';
   }
 
   if (state.feat.filter) return applyFilter(fg);
   return fg;
+}
+
+/** 把掩膜 alpha 的中间值拉向 0 / 1，减少换底色后的灰边与光晕 */
+function hardenCanvasAlpha(canvas, lo, hi) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const k = 1 / (hi - lo);
+  for (let i = 3; i < d.length; i += 4) {
+    const v = (d[i] / 255 - lo) * k;
+    d[i] = v <= 0 ? 0 : (v >= 1 ? 255 : Math.round(v * 255));
+  }
+  ctx.putImageData(img, 0, 0);
 }
 
 function applyFilter(src) {
@@ -1215,7 +1352,7 @@ function compose() {
   if (state.feat.background) {
     const bgImg = selectedBgId ? bgCache.get(selectedBgId) : null;
     if (bgImg) {
-      drawCover(ctx, bgImg, outW, outH);   // 背景图铺在最底层
+      drawCover(ctx, bgImg, outW, outH, state.bgOffsetX);   // 背景图铺在最底层
     } else {
       ctx.fillStyle = rgbToCss(state.color);
       ctx.fillRect(0, 0, outW, outH);
@@ -1273,6 +1410,7 @@ function doRender() {
   setChecks(checks);
   $('preview-dim').textContent = `${canvas.width} × ${canvas.height}`;
   $('btn-continue').disabled = !checks.every((c) => c.type !== 'bad');
+  syncCanvasCursor();   // 有背景图时显示可拖拽手势
 }
 
 function buildChecks(result) {
@@ -1310,7 +1448,7 @@ function buildChecks(result) {
   }
 
   if (selectedBgId) {
-    checks.push({ type: 'ok', text: '✓ 已使用背景图片，人像置顶' });
+    checks.push({ type: 'ok', text: '✓ 已使用背景图片 · 左右拖动可调整取景' });
   }
 
   if (!state.faceBox) {
@@ -1335,7 +1473,7 @@ function setChecks(list) {
    继续 → 完成弹层 → 下载 / 存历史
    ══════════════════════════════════════════════════ */
 function safeFileName() {
-  const sizeName = state.feat.resize ? SIZE_PRESETS[state.size].name : 'custom';
+  const sizeName = state.feat.resize ? getSizePreset().name : 'custom';
   const colorName = state.colorName || 'custom';
   return `证件照_${sizeName}_${colorName}`;
 }
@@ -1576,6 +1714,7 @@ async function selectBackground(id) {
     if (changed) syncFeatStyles();
   }
 
+  if (selectedBgId !== id) state.bgOffsetX = 0;   // 换背景图时回到居中
   selectedBgId = id;
   renderBgGrid();
   syncBgMode();
@@ -1585,7 +1724,10 @@ async function selectBackground(id) {
 function deleteBackground(id) {
   backgrounds = backgrounds.filter((b) => b.id !== id);
   bgCache.delete(id);
-  if (selectedBgId === id) selectedBgId = null;
+  if (selectedBgId === id) {
+    selectedBgId = null;
+    state.bgOffsetX = 0;
+  }
   persistBackgrounds();
   renderBgGrid();
   syncBgMode();
@@ -1600,14 +1742,18 @@ function syncBgMode() {
   $('bg-mode-note').classList.toggle('hidden', !locked);
 }
 
-/** 背景图按 cover 方式铺满输出尺寸（保持比例，居中裁切） */
-function drawCover(ctx, img, w, h) {
+/** 背景图按 cover 方式铺满输出尺寸（保持比例，居中裁切）
+ *  offsetX：-1 最左 / 0 居中 / 1 最右，用于手动选取背景的取景位置 */
+function drawCover(ctx, img, w, h, offsetX = 0) {
   const iw = img.naturalWidth || img.width;
   const ih = img.naturalHeight || img.height;
   if (!iw || !ih) return;
   const s = Math.max(w / iw, h / ih);
   const dw = iw * s, dh = ih * s;
-  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  const extra = Math.max(0, dw - w);          // 横向可移动的余量
+  const off = Math.max(-1, Math.min(1, offsetX));
+  const dx = -extra / 2 + (extra / 2) * off;  // -1 → 最左，1 → 最右
+  ctx.drawImage(img, dx, (h - dh) / 2, dw, dh);
 }
 
 /* ══════════════════════════════════════════════════
@@ -1705,7 +1851,7 @@ function saveCurrentToHistory() {
     id: Date.now() + '_' + Math.random().toString(36).slice(2, 7),
     dataUrl,
     srcDataUrl,
-    size: state.feat.resize ? SIZE_PRESETS[state.size].name : 'custom',
+    size: state.feat.resize ? getSizePreset().name : 'custom',
     color: state.colorName || 'custom',
     w: result.canvas.width,
     h: result.canvas.height,
@@ -1716,11 +1862,15 @@ function saveCurrentToHistory() {
     // 记录参数，二次编辑时原样还原
     snapshot: {
       size: state.size,
+      customW: state.customW,
+      customH: state.customH,
+      cropZoom: state.cropZoom,
       feat: { ...state.feat },
       color: { ...state.color },
       colorName: state.colorName,
       filter: { ...state.filter },
       bgId: selectedBgId,
+      bgOffsetX: state.bgOffsetX,
     },
   };
 
@@ -1772,11 +1922,32 @@ async function editHistoryItem(id) {
     const img = await loadImageFromUrl(item.srcDataUrl);
     const snap = item.snapshot || {};
 
-    // ── 还原尺寸 ──
-    if (snap.size && SIZE_PRESETS[snap.size]) {
-      state.size = snap.size;
+    // ── 还原尺寸（含自定义）──
+    if (snap.size) {
+      const valid = snap.size === 'custom' || SIZE_PRESETS[snap.size];
+      state.size = valid ? snap.size : '1inch';
+      const isCustom = state.size === 'custom';
+
+      if (isCustom) {
+        state.customW = clampInt(snap.customW, 100, 2000, state.customW);
+        state.customH = clampInt(snap.customH, 100, 2000, state.customH);
+        $('custom-w').value = state.customW;
+        $('custom-h').value = state.customH;
+        updateCustomLabel();
+
+        state.cropZoom = Math.max(1, Math.min(2.6, Number(snap.cropZoom) || 1));
+        $('custom-zoom').value = Math.round(state.cropZoom * 100);
+        $('custom-zoom-v').textContent = state.cropZoom.toFixed(2) + '×';
+      } else {
+        state.cropZoom = 1;
+      }
+
       document.querySelectorAll('.size-item').forEach((o) =>
-        o.classList.toggle('on', o.dataset.size === snap.size));
+        o.classList.toggle('on', o.dataset.size === state.size));
+      $('custom-size-row').classList.toggle('hidden', !isCustom);
+      $('custom-ratio-tip').classList.toggle('hidden', !isCustom);
+      $('custom-zoom-row').classList.toggle('hidden', !isCustom);
+      $('custom-tip').classList.toggle('hidden', !isCustom);
     }
 
     // ── 还原功能勾选 ──
@@ -1805,8 +1976,12 @@ async function editHistoryItem(id) {
     if (bgItem) {
       await getBgImage(bgItem);      // 预解码，保证合成时能同步取到
       selectedBgId = bgItem.id;
+      state.bgOffsetX = (typeof snap.bgOffsetX === 'number')
+        ? Math.max(-1, Math.min(1, snap.bgOffsetX))
+        : 0;
     } else {
       selectedBgId = null;
+      state.bgOffsetX = 0;
       if (snap.color) setColor(snap.color, true);
     }
     syncBgMode();
@@ -2100,10 +2275,84 @@ document.querySelectorAll('.size-item').forEach((item) => {
   item.addEventListener('click', () => {
     state.size = item.dataset.size;
     document.querySelectorAll('.size-item').forEach((o) => o.classList.toggle('on', o === item));
+    // 选自定义时展开宽高输入与取景范围
+    const isCustom = state.size === 'custom';
+    $('custom-size-row').classList.toggle('hidden', !isCustom);
+    $('custom-ratio-tip').classList.toggle('hidden', !isCustom);
+    $('custom-zoom-row').classList.toggle('hidden', !isCustom);
+    $('custom-tip').classList.toggle('hidden', !isCustom);
     setStage(state.stage);   // 刷新取景框比例
     render();
   });
 });
+
+// 自定义取景范围：放大裁剪框，人像变小、背景露出更多
+$('custom-zoom').addEventListener('input', () => {
+  state.cropZoom = +$('custom-zoom').value / 100;
+  $('custom-zoom-v').textContent = state.cropZoom.toFixed(2) + '×';
+  if (state.size === 'custom') render();
+});
+
+// 自定义尺寸输入：输入过程中只接受有效值，失焦时回写到合法值
+['custom-w', 'custom-h'].forEach((id) => {
+  const el = $(id);
+  el.addEventListener('input', () => {
+    const raw = Number(el.value);
+    if (!Number.isFinite(raw) || raw < 100 || raw > 2000) return;
+    const v = Math.round(raw);
+    if (id === 'custom-w') state.customW = v; else state.customH = v;
+    updateCustomLabel();
+    if (state.size === 'custom') {
+      setStage(state.stage);
+      render();
+    }
+  });
+  el.addEventListener('blur', () => {
+    el.value = id === 'custom-w' ? state.customW : state.customH;
+  });
+});
+
+/* ── 背景图水平拖拽 ── */
+let bgDrag = null;
+
+function bgDraggable() {
+  return !!selectedBgId && !!bgCache.get(selectedBgId);
+}
+function syncCanvasCursor() {
+  const c = $('preview-canvas');
+  if (bgDrag) { c.style.cursor = 'grabbing'; return; }
+  c.style.cursor = bgDraggable() ? 'grab' : '';
+}
+
+{
+  const cv = $('preview-canvas');
+
+  cv.addEventListener('pointerdown', (e) => {
+    if (!bgDraggable()) return;
+    bgDrag = { startX: e.clientX, startOffset: state.bgOffsetX };
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    syncCanvasCursor();
+    e.preventDefault();
+  });
+
+  cv.addEventListener('pointermove', (e) => {
+    if (!bgDrag) return;
+    const cw = cv.clientWidth || 295;
+    // 拖过半个画布宽度 = 走到最左/最右
+    const delta = (e.clientX - bgDrag.startX) / (cw / 2);
+    state.bgOffsetX = Math.max(-1, Math.min(1, bgDrag.startOffset + delta));
+    render();
+  });
+
+  const end = (e) => {
+    if (!bgDrag) return;
+    bgDrag = null;
+    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    syncCanvasCursor();
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+}
 
 [['f-bright', 'brightness', 'f-bright-v'],
  ['f-contrast', 'contrast', 'f-contrast-v'],
@@ -2195,6 +2444,7 @@ placeCursors();
 setStage('empty');
 loadHistory();
 loadBackgrounds();
+updateCustomLabel();
 </script>
 </body>
 </html>
